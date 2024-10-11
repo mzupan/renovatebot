@@ -16,15 +16,10 @@ on:
 
 jobs:
   renovate:
-    runs-on: [self-hosted, gitops]
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4.1.7
-      - name: configure aws credentials
-        uses: aws-actions/configure-aws-credentials@v4.0.2
-        with:
-          aws-region: us-east-1
-      - uses: aws-actions/amazon-ecr-login@v2
       - name: Self-hosted Renovate
         uses: renovatebot/github-action@8ce0fe8066eb6b16e1bf499b21bc96e5ccd962a4 # v40.2.3
         with:
