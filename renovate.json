@@ -7,6 +7,9 @@
   "labels": [
     "dependencies"
   ],
+  "vulnerabilityAlerts": {
+    "addLabels": ["security"]
+  },
   "prHourlyLimit": 10,
   "github-actions": {
     "enabled": true,
