@@ -27,6 +27,13 @@
       "github-actions"
     ]
   },
+  "helm-requirements": {
+    "enabled": true,
+    "labels": [
+      "dependencies",
+      "helm-requirements"
+    ]
+  },
   "packageRules": [
     {
       "matchDepTypes": [
