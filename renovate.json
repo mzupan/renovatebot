@@ -16,7 +16,6 @@
     "github-actions",
     "helm-values",
     "helmv3",
-    "helm-requirements",
     "kubernetes",
     "terraform"
   ],
@@ -27,11 +26,11 @@
       "github-actions"
     ]
   },
-  "helm-requirements": {
+  "helmv3": {
     "enabled": true,
     "labels": [
       "dependencies",
-      "helm-requirements"
+      "helm"
     ]
   },
   "packageRules": [
