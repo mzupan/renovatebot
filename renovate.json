@@ -20,6 +20,6 @@
     }
   ],
   "argocd": {
-    "fileMatch": ["charts/.*/Chart\\.yaml$"]
+    "fileMatch": ["charts/hello/Chart.yaml"]
   }
 }
