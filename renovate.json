@@ -8,24 +8,6 @@
     "dependencies"
   ],
   "prHourlyLimit": 10,
-  "packageRules": [
-    {
-      "matchManagers": [
-        "helm-requirements",
-        "helm-values"
-      ],
-      "groupName": "Helm Charts",
-      "groupSlug": "helm-charts",
-      "groupMessage": "Update Helm chart versions",
-      "automerge": false
-    },
-    {
-      "matchUpdateTypes": [
-        "major"
-      ],
-      "dependencyDashboardApproval": true
-    }
-  ],
   "github-actions": {
     "enabled": true,
     "labels": [
