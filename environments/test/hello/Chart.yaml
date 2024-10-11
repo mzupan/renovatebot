@@ -1,8 +1,0 @@
-apiVersion: argoproj.io/v1alpha1
-kind: application
-name: event-exporter
-version: 0.0.1
-dependencies:
-- name: kubernetes-event-exporter
-  version: 2.5.2
-  repository: oci://registry-1.docker.io/bitnamicharts
