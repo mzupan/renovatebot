@@ -16,6 +16,7 @@
     "github-actions",
     "helm-values",
     "helmv3",
+    "helm-requirements",
     "kubernetes",
     "terraform"
   ],
