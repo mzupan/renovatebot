@@ -18,7 +18,7 @@
   "helm-requirements": {
     "enabled": true,
     "fileMatch": [
-      "^environments/.+/Chart\\.yaml$"
+      "^environments/**/Chart\\.yaml$"
     ],
     "labels": [
       "dependencies",
@@ -28,7 +28,7 @@
   "helm-values": {
     "enabled": true,
     "fileMatch": [
-      "^environments/.+/values\\.yaml$"
+      "^environments/**/values\\.yaml$"
     ],
     "labels": [
       "dependencies",
