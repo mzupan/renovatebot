@@ -8,9 +8,6 @@
     "dependencies"
   ],
   "prHourlyLimit": 10,
-  "baseBranches": [
-    "aaa"
-  ],
   "packageRules": [
     {
       "matchManagers": [
