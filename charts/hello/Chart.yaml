@@ -1,6 +1,7 @@
-apiVersion: v2
-name: hello
-version: 0.0.0
+apiVersion: argoproj.io/v1alpha1
+kind: application
+name: event-exporter
+version: 0.0.1
 dependencies:
   - name: kube-prometheus-stack
     version: 61.3.1
