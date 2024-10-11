@@ -11,28 +11,6 @@
     "addLabels": ["security"]
   },
   "prHourlyLimit": 10,
-  "enabledManagers": [
-    "dockerfile",
-    "github-actions",
-    "helm-values",
-    "helmv3",
-    "kubernetes",
-    "terraform"
-  ],
-  "github-actions": {
-    "enabled": true,
-    "labels": [
-      "dependencies",
-      "github-actions"
-    ]
-  },
-  "helmv3": {
-    "enabled": true,
-    "labels": [
-      "dependencies",
-      "helm"
-    ]
-  },
   "packageRules": [
     {
       "matchDepTypes": [
