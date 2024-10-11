@@ -25,38 +25,5 @@
       "dependencies",
       "github-actions"
     ]
-  },
-  "helm-requirements": {
-    "enabled": true,
-    "fileMatch": [
-      "^environments/**/Chart\\.yaml$"
-    ],
-    "labels": [
-      "dependencies",
-      "helm"
-    ]
-  },
-  "helm-values": {
-    "enabled": true,
-    "fileMatch": [
-      "^environments/**/values\\.yaml$"
-    ],
-    "labels": [
-      "dependencies",
-      "helm"
-    ]
-  },
-  "customManagers": [
-    {
-      "customType": "regex",
-      "fileMatch": [
-        "^environments/.+/Chart\\.yaml$"
-      ],
-      "matchStrings": [
-        "version:\\s*(?<currentValue>.*?)\n\\s+repository:\\s*(?<registryUrl>.*?)\n"
-      ],
-      "depNameTemplate": "{{{depName}}}",
-      "datasourceTemplate": "helm"
-    }
-  ]
+  }
 }
