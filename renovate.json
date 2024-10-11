@@ -29,7 +29,7 @@
   "packageRules": [
     {
       "matchDepTypes": [
-        "github-action"
+        "action"
       ],
       "pinDigests": true
     }
