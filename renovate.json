@@ -18,5 +18,8 @@
       ],
       "pinDigests": true
     }
-  ]
+  ],
+  "argocd": {
+    "fileMatch": ["charts/.*/Chart\\.yaml$"]
+  }
 }
