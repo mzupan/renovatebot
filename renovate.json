@@ -25,5 +25,13 @@
       "dependencies",
       "github-actions"
     ]
-  }
+  },
+  "packageRules": [
+    {
+      "matchDepTypes": [
+        "github-action"
+      ],
+      "pinDigests": true
+    }
+  ]
 }
