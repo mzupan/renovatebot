@@ -11,6 +11,7 @@
     "addLabels": ["security"]
   },
   "prHourlyLimit": 10,
+  "additionalBranchPrefix": "{{parentDir}}-",
   "packageRules": [
     {
       "matchDepTypes": [
