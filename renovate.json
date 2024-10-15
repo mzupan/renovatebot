@@ -4,6 +4,7 @@
     "config:recommended",
     ":dependencyDashboard"
   ],
+  "ignorePresets": ["group:monorepos", "group:recommended"],
   "labels": [
     "dependencies"
   ],
