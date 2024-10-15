@@ -18,15 +18,5 @@
       ],
       "pinDigests": true
     }
-  ],
-  "customManagers": [
-    {
-      "customType": "regex",
-      "matchStrings": [
-        "source:\\n.*chart: (?<depName>.*)\\n.*repoURL: (?<registryUrl>.*)\\n.*targetRevision: (?<currentValue>.*)"
-      ],
-      "fileMatch": ["\\.yaml$", "\\.yml$"],
-      "datasourceTemplate": "helm"
-    }
   ]
 }
