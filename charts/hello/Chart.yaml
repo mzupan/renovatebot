@@ -1,6 +1,7 @@
-apiVersion: argoproj.io/v1alpha1
+apiVersion: v2
 kind: application
 name: event-exporter
+description: A Helm chart for the RDS Storage Autoscale Exporter
 version: 0.0.1
 dependencies:
   - name: kube-prometheus-stack
