@@ -11,7 +11,6 @@
     "addLabels": ["security"]
   },
   "prHourlyLimit": 10,
-  "additionalBranchPrefix": "{{parentDir}}-",
   "packageRules": [
     {
       "matchDepTypes": [
@@ -23,13 +22,15 @@
       "matchFileNames": [
         "envs/dev/**"
       ],
-      "labels": ["dev"]
+      "labels": ["dev"],
+      "additionalBranchPrefix": "dev-{{parentDir}}-"
     },
     {
       "matchFileNames": [
         "envs/prod/**"
       ],
-      "labels": ["production"]
+      "labels": ["production"],
+      "additionalBranchPrefix": "prod-{{parentDir}}-"
     }
   ]
 }
