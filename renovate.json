@@ -19,13 +19,13 @@
       "pinDigests": true
     },
     {
-      "paths": [
+      "matchFileNames": [
         "envs/dev/**"
       ],
       "labels": ["dev"]
     },
     {
-      "paths": [
+      "matchFileNames": [
         "envs/prod/**"
       ],
       "labels": ["production"]
