@@ -124,10 +124,17 @@ extract_from_chart() {
                 images+=("$image")
             fi
         done < <(grep -E '\bimage:' "$chart_path/values.yaml" 2>/dev/null || true)
+    else
+        debug "No values.yaml found in $chart_path - this is normal for charts with dependencies"
     fi
 
-    # Return unique images
-    printf '%s\n' "${images[@]}" | sort -u
+    # Return unique images (handle case where no images found)
+    if [[ ${#images[@]} -gt 0 ]]; then
+        printf '%s\n' "${images[@]}" | sort -u
+    else
+        debug "No images found in chart: $chart_path"
+        # Return nothing (empty output) which is valid
+    fi
 }
 
 # Function to process an image and add metadata

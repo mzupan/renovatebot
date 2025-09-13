@@ -158,13 +158,26 @@ jobs:
           CHARTS="${{ steps.changes.outputs.charts }}"
           echo "Processing charts: $CHARTS"
 
-          # Check if charts exist
+          # Check if charts exist and show their contents
           for chart in $CHARTS; do
             if [[ -d "$chart" ]]; then
               echo "✓ Chart directory exists: $chart"
-              ls -la "$chart" | head -5
+              echo "Contents:"
+              ls -la "$chart"
+              if [[ -f "$chart/Chart.yaml" ]]; then
+                echo "Chart.yaml contents:"
+                cat "$chart/Chart.yaml"
+              fi
+              if [[ -f "$chart/values.yaml" ]]; then
+                echo "values.yaml contents:"
+                cat "$chart/values.yaml"
+              else
+                echo "⚠ No values.yaml found in $chart"
+              fi
             else
               echo "⚠ Chart directory not found: $chart"
+              echo "Current directory contents:"
+              ls -la .
             fi
           done
           echo "::endgroup::"
@@ -173,30 +186,41 @@ jobs:
           # Extract images from changed charts and save directly to file
           if [[ -n "$CHARTS" ]]; then
             echo "Running: scripts/extract-images.sh $CHARTS"
+            echo "Current working directory: $(pwd)"
+            echo "Script path check:"
+            ls -la scripts/extract-images.sh
 
-            # Run script with error handling
-            if scripts/extract-images.sh $CHARTS > images_raw.json 2> extract_errors.log; then
+            # Run script with error handling and verbose output
+            set +e  # Don't exit on error, handle it ourselves
+            scripts/extract-images.sh $CHARTS > images_raw.json 2> extract_errors.log
+            EXIT_CODE=$?
+            set -e
+
+            if [[ $EXIT_CODE -eq 0 ]]; then
               echo "✓ Script executed successfully"
               mv images_raw.json images.json
             else
-              EXIT_CODE=$?
               echo "❌ Script failed with exit code: $EXIT_CODE"
               echo "Error output:"
               cat extract_errors.log
+              echo "Current directory after script:"
+              pwd
+              echo "Files created:"
+              ls -la *.json *.log 2>/dev/null || echo "No json/log files created"
 
               # Check if we got partial output
-              if [[ -f images_raw.json ]]; then
+              if [[ -f images_raw.json ]] && [[ -s images_raw.json ]]; then
                 echo "Partial output exists, attempting to use it:"
                 cat images_raw.json
                 mv images_raw.json images.json
               else
-                echo "No output generated, using empty array"
+                echo "No useful output generated, using empty array"
                 echo "[]" > images.json
               fi
             fi
 
             # Show any error messages
-            if [[ -s extract_errors.log ]]; then
+            if [[ -f extract_errors.log ]] && [[ -s extract_errors.log ]]; then
               echo "::warning::Script stderr output:"
               cat extract_errors.log
             fi
