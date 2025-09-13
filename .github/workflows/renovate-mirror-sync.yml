@@ -134,11 +134,22 @@ jobs:
       - name: Extract Docker images from charts
         id: extract
         run: |
+          set -euo pipefail
+
+          # Enable debugging
+          echo "::group::Setup"
+
           # Make script executable
           chmod +x scripts/extract-images.sh
 
+          # Check script exists and is readable
+          if [[ ! -r scripts/extract-images.sh ]]; then
+            echo "❌ Error: Script not readable at scripts/extract-images.sh"
+            exit 1
+          fi
+
           # Run extraction script
-          export DEBUG=false  # Set to true for debugging
+          export DEBUG=true  # Enable debug for visibility
           export MIRROR_REGISTRY="${{ env.MIRROR_REGISTRY }}"
           export MIRROR_PREFIX="${{ env.MIRROR_PREFIX }}"
           export OUTPUT_FORMAT=json
@@ -151,25 +162,61 @@ jobs:
           for chart in $CHARTS; do
             if [[ -d "$chart" ]]; then
               echo "✓ Chart directory exists: $chart"
+              ls -la "$chart" | head -5
             else
               echo "⚠ Chart directory not found: $chart"
             fi
           done
+          echo "::endgroup::"
 
+          echo "::group::Extract Images"
           # Extract images from changed charts and save directly to file
           if [[ -n "$CHARTS" ]]; then
-            # Run script and capture JSON output to file, stderr goes to console
-            scripts/extract-images.sh $CHARTS > images.json
+            echo "Running: scripts/extract-images.sh $CHARTS"
+
+            # Run script with error handling
+            if scripts/extract-images.sh $CHARTS > images_raw.json 2> extract_errors.log; then
+              echo "✓ Script executed successfully"
+              mv images_raw.json images.json
+            else
+              EXIT_CODE=$?
+              echo "❌ Script failed with exit code: $EXIT_CODE"
+              echo "Error output:"
+              cat extract_errors.log
+
+              # Check if we got partial output
+              if [[ -f images_raw.json ]]; then
+                echo "Partial output exists, attempting to use it:"
+                cat images_raw.json
+                mv images_raw.json images.json
+              else
+                echo "No output generated, using empty array"
+                echo "[]" > images.json
+              fi
+            fi
+
+            # Show any error messages
+            if [[ -s extract_errors.log ]]; then
+              echo "::warning::Script stderr output:"
+              cat extract_errors.log
+            fi
           else
             echo "No charts to process"
             echo "[]" > images.json
           fi
+          echo "::endgroup::"
+
+          echo "::group::Validate JSON"
+          # Check what we got
+          echo "Raw JSON output (first 500 chars):"
+          head -c 500 images.json
+          echo ""
 
           # Validate and format the JSON
-          if jq '.' images.json > images_formatted.json 2>/dev/null; then
+          if jq '.' images.json > images_formatted.json 2> jq_errors.log; then
             mv images_formatted.json images.json
             IMAGE_COUNT=$(jq 'length' images.json)
-            echo "✓ Found $IMAGE_COUNT unique images"
+            echo "✓ Valid JSON with $IMAGE_COUNT images"
 
             # Save to GitHub output for other jobs
             echo "images<<EOF" >> $GITHUB_OUTPUT
@@ -177,18 +224,27 @@ jobs:
             echo "EOF" >> $GITHUB_OUTPUT
             echo "image_count=$IMAGE_COUNT" >> $GITHUB_OUTPUT
           else
-            echo "⚠ Failed to parse images JSON, using empty array"
+            echo "❌ Failed to parse images JSON:"
+            cat jq_errors.log
+            echo "Using empty array as fallback"
             echo "[]" > images.json
             echo "images=[]" >> $GITHUB_OUTPUT
             echo "image_count=0" >> $GITHUB_OUTPUT
           fi
+          echo "::endgroup::"
 
+          echo "::group::Summary"
           # Display summary
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
           echo "📦 Image Extraction Summary:"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          jq -r '.[] | "  • \(.original) → \(.mirror)"' images.json 2>/dev/null || echo "  No images found"
+          if [[ -f images.json ]] && [[ $(jq 'length' images.json 2>/dev/null) -gt 0 ]]; then
+            jq -r '.[] | "  • \(.original) → \(.mirror)"' images.json
+          else
+            echo "  No images found"
+          fi
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "::endgroup::"
 
       - name: Upload images list
         uses: actions/upload-artifact@v4
