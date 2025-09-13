@@ -155,6 +155,7 @@ jobs:
 
           # Run extraction script
           export DEBUG=true  # Enable debug for visibility
+          export BASH_DEBUG=true  # Enable bash -x debugging
           export MIRROR_REGISTRY="${{ env.MIRROR_REGISTRY }}"
           export MIRROR_PREFIX="${{ env.MIRROR_PREFIX }}"
           export OUTPUT_FORMAT=json

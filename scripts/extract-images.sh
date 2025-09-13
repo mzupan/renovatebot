@@ -4,6 +4,11 @@
 
 set -euo pipefail
 
+# Enable bash debugging if BASH_DEBUG is set
+if [[ "${BASH_DEBUG:-false}" == "true" ]]; then
+    set -x
+fi
+
 # Default values
 MIRROR_REGISTRY="${MIRROR_REGISTRY:-registry.internal.company.com}"
 MIRROR_PREFIX="${MIRROR_PREFIX:-dockerhub}"
