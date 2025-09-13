@@ -193,9 +193,6 @@ jobs:
               continue
             fi
 
-            echo "Template output (first 1000 chars):"
-            echo "$TEMPLATE_OUTPUT" | head -c 1000
-            echo "..."
 
             # Extract images from template output
             echo "Extracting images..."
