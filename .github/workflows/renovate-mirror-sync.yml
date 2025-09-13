@@ -134,16 +134,10 @@ jobs:
       - name: Extract Docker images from charts
         id: extract
         run: |
-          # Check if script exists
-          if [[ ! -f scripts/extract-images.sh ]]; then
-            echo "Script not found, checking out..."
-            ls -la
-          fi
-
           # Make script executable
           chmod +x scripts/extract-images.sh
 
-          # Run extraction script with debug enabled for visibility
+          # Run extraction script
           export DEBUG=false  # Set to true for debugging
           export MIRROR_REGISTRY="${{ env.MIRROR_REGISTRY }}"
           export MIRROR_PREFIX="${{ env.MIRROR_PREFIX }}"
@@ -156,31 +150,45 @@ jobs:
           # Check if charts exist
           for chart in $CHARTS; do
             if [[ -d "$chart" ]]; then
-              echo "Chart directory exists: $chart"
+              echo "✓ Chart directory exists: $chart"
             else
-              echo "WARNING: Chart directory not found: $chart"
+              echo "⚠ Chart directory not found: $chart"
             fi
           done
 
-          # Extract images from changed charts
+          # Extract images from changed charts and save directly to file
           if [[ -n "$CHARTS" ]]; then
-            IMAGES_JSON=$(scripts/extract-images.sh $CHARTS)
+            # Run script and capture JSON output to file, stderr goes to console
+            scripts/extract-images.sh $CHARTS > images.json
           else
             echo "No charts to process"
-            IMAGES_JSON="[]"
+            echo "[]" > images.json
           fi
 
-          # Save to output
-          echo "images<<EOF" >> $GITHUB_OUTPUT
-          echo "$IMAGES_JSON" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          # Validate and format the JSON
+          if jq '.' images.json > images_formatted.json 2>/dev/null; then
+            mv images_formatted.json images.json
+            IMAGE_COUNT=$(jq 'length' images.json)
+            echo "✓ Found $IMAGE_COUNT unique images"
 
-          # Also save to artifact for debugging
-          echo "$IMAGES_JSON" | jq '.' > images.json
+            # Save to GitHub output for other jobs
+            echo "images<<EOF" >> $GITHUB_OUTPUT
+            cat images.json >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            echo "image_count=$IMAGE_COUNT" >> $GITHUB_OUTPUT
+          else
+            echo "⚠ Failed to parse images JSON, using empty array"
+            echo "[]" > images.json
+            echo "images=[]" >> $GITHUB_OUTPUT
+            echo "image_count=0" >> $GITHUB_OUTPUT
+          fi
 
-          # Log summary
-          IMAGE_COUNT=$(echo "$IMAGES_JSON" | jq 'length')
-          echo "Found $IMAGE_COUNT unique images"
+          # Display summary
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "📦 Image Extraction Summary:"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          jq -r '.[] | "  • \(.original) → \(.mirror)"' images.json 2>/dev/null || echo "  No images found"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
       - name: Upload images list
         uses: actions/upload-artifact@v4
@@ -189,15 +197,22 @@ jobs:
           path: images.json
 
   create-mirror-checklist:
-    needs: extract-images
-    if: needs.extract-images.outputs.images != '[]'
+    needs: [check-pr, extract-images]
+    if: needs.extract-images.outputs.image_count > 0
     runs-on: ubuntu-latest
     steps:
+      - name: Download images artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: images-list
+
       - name: Create mirror checklist comment
         uses: actions/github-script@v7
         with:
           script: |
-            const images = ${{ needs.extract-images.outputs.images }};
+            const fs = require('fs');
+            const imagesJson = fs.readFileSync('images.json', 'utf8');
+            const images = JSON.parse(imagesJson);
             const prNumber = ${{ needs.check-pr.outputs.pr_number || github.event.pull_request.number }};
 
             if (!images || images.length === 0) {
