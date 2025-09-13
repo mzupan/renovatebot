@@ -163,9 +163,16 @@ main() {
         # Clean up chart path
         chart=$(echo "$chart" | sed 's|/$||')
 
+        # Try to handle relative and absolute paths
         if [[ ! -d "$chart" ]]; then
-            warn "Skipping non-existent directory: $chart"
-            continue
+            # Try with ./ prefix if not found
+            if [[ -d "./$chart" ]]; then
+                chart="./$chart"
+                debug "Using relative path: $chart"
+            else
+                warn "Skipping non-existent directory: $chart (pwd: $(pwd))"
+                continue
+            fi
         fi
 
         # Extract images from this chart
@@ -182,7 +189,10 @@ main() {
     done
 
     # Remove duplicates and format output
-    local unique_images=$(printf '%s\n' "${processed_images[@]}" | sort -u)
+    local unique_images=""
+    if [[ ${#processed_images[@]} -gt 0 ]]; then
+        unique_images=$(printf '%s\n' "${processed_images[@]}" | sort -u)
+    fi
 
     if [[ "$OUTPUT_FORMAT" == "json" ]]; then
         # Output as JSON array
