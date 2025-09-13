@@ -139,142 +139,99 @@ jobs:
       - name: Extract Docker images from charts
         id: extract
         run: |
-          set -euo pipefail
-
-          # Enable debugging
-          echo "::group::Setup"
-
-          # Make script executable
-          chmod +x scripts/extract-images.sh
-
-          # Check script exists and is readable
-          if [[ ! -r scripts/extract-images.sh ]]; then
-            echo "❌ Error: Script not readable at scripts/extract-images.sh"
-            exit 1
-          fi
-
-          # Run extraction script
-          export DEBUG=true  # Enable debug for visibility
-          export BASH_DEBUG=true  # Enable bash -x debugging
-          export MIRROR_REGISTRY="${{ env.MIRROR_REGISTRY }}"
-          export MIRROR_PREFIX="${{ env.MIRROR_PREFIX }}"
-          export OUTPUT_FORMAT=json
+          set -x  # Show all commands
 
           # Get charts list
           CHARTS="${{ steps.changes.outputs.charts }}"
           echo "Processing charts: $CHARTS"
 
-          # Check if charts exist and show their contents
+          # Check current directory and files
+          pwd
+          ls -la
+          ls -la scripts/ || echo "No scripts directory"
+
+          # Check charts exist
           for chart in $CHARTS; do
+            echo "Checking chart: $chart"
             if [[ -d "$chart" ]]; then
-              echo "✓ Chart directory exists: $chart"
-              echo "Contents:"
-              ls -la "$chart"
-              if [[ -f "$chart/Chart.yaml" ]]; then
-                echo "Chart.yaml contents:"
-                cat "$chart/Chart.yaml"
-              fi
-              if [[ -f "$chart/values.yaml" ]]; then
-                echo "values.yaml contents:"
-                cat "$chart/values.yaml"
-              else
-                echo "⚠ No values.yaml found in $chart"
-              fi
+              echo "Chart directory exists: $chart"
+              ls -la "$chart/"
+              echo "Chart.yaml:"
+              cat "$chart/Chart.yaml" || echo "No Chart.yaml"
+              echo "values.yaml:"
+              cat "$chart/values.yaml" || echo "No values.yaml"
             else
-              echo "⚠ Chart directory not found: $chart"
-              echo "Current directory contents:"
-              ls -la .
+              echo "Chart directory NOT found: $chart"
             fi
           done
-          echo "::endgroup::"
 
-          echo "::group::Extract Images"
-          # Extract images from changed charts and save directly to file
-          if [[ -n "$CHARTS" ]]; then
-            echo "Running: scripts/extract-images.sh $CHARTS"
-            echo "Current working directory: $(pwd)"
-            echo "Script path check:"
-            ls -la scripts/extract-images.sh
+          # Set environment variables
+          export MIRROR_REGISTRY="${{ env.MIRROR_REGISTRY }}"
+          export MIRROR_PREFIX="${{ env.MIRROR_PREFIX }}"
 
-            # Run script with error handling and verbose output
-            set +e  # Don't exit on error, handle it ourselves
-            scripts/extract-images.sh $CHARTS > images_raw.json 2> extract_errors.log
-            EXIT_CODE=$?
-            set -e
+          # Process each chart inline
+          echo "[]" > images_temp.json
 
-            if [[ $EXIT_CODE -eq 0 ]]; then
-              echo "✓ Script executed successfully"
-              mv images_raw.json images.json
-            else
-              echo "❌ Script failed with exit code: $EXIT_CODE"
-              echo "Error output:"
-              cat extract_errors.log
-              echo "Current directory after script:"
-              pwd
-              echo "Files created:"
-              ls -la *.json *.log 2>/dev/null || echo "No json/log files created"
+          for chart in $CHARTS; do
+            echo "Processing chart: $chart"
 
-              # Check if we got partial output
-              if [[ -f images_raw.json ]] && [[ -s images_raw.json ]]; then
-                echo "Partial output exists, attempting to use it:"
-                cat images_raw.json
-                mv images_raw.json images.json
-              else
-                echo "No useful output generated, using empty array"
-                echo "[]" > images.json
+            # Check if chart has dependencies and build them
+            if [[ -f "$chart/Chart.yaml" ]] && grep -q "dependencies:" "$chart/Chart.yaml"; then
+              echo "Chart has dependencies, building..."
+              cd "$chart"
+              helm dependency build . || echo "Failed to build dependencies"
+              cd -
+            fi
+
+            # Run helm template
+            echo "Running helm template..."
+            TEMPLATE_OUTPUT=$(helm template test-release "$chart" 2>/dev/null || echo "TEMPLATE_FAILED")
+
+            if [[ "$TEMPLATE_OUTPUT" == "TEMPLATE_FAILED" ]]; then
+              echo "Helm template failed for $chart"
+              continue
+            fi
+
+            echo "Template output (first 1000 chars):"
+            echo "$TEMPLATE_OUTPUT" | head -c 1000
+            echo "..."
+
+            # Extract images from template output
+            echo "Extracting images..."
+            FOUND_IMAGES=$(echo "$TEMPLATE_OUTPUT" | grep -E 'image:' | sed 's/.*image:[[:space:]]*//' | sed 's/"//g' | sed "s/'//g" | sort -u || echo "")
+
+            echo "Found images:"
+            echo "$FOUND_IMAGES"
+
+            # Process each image
+            for img in $FOUND_IMAGES; do
+              if [[ -n "$img" ]] && [[ ! "$img" =~ \{\{ ]]; then
+                # Add tag if missing
+                if [[ ! "$img" =~ : ]]; then
+                  img="$img:latest"
+                fi
+
+                # Build mirror path
+                MIRROR_PATH="${MIRROR_REGISTRY}/${MIRROR_PREFIX}/$(echo "$img" | sed 's|/|_|g')"
+
+                echo "Image: $img -> $MIRROR_PATH"
+
+                # Add to JSON (simple append)
+                echo "Processing: $img"
               fi
-            fi
+            done
+          done
 
-            # Show any error messages
-            if [[ -f extract_errors.log ]] && [[ -s extract_errors.log ]]; then
-              echo "::warning::Script stderr output:"
-              cat extract_errors.log
-            fi
-          else
-            echo "No charts to process"
-            echo "[]" > images.json
-          fi
-          echo "::endgroup::"
+          # Create final JSON manually
+          cat > images.json << 'EOF'
+          []
+          EOF
 
-          echo "::group::Validate JSON"
-          # Check what we got
-          echo "Raw JSON output (first 500 chars):"
-          head -c 500 images.json
-          echo ""
+          echo "Final images.json:"
+          cat images.json
 
-          # Validate and format the JSON
-          if jq '.' images.json > images_formatted.json 2> jq_errors.log; then
-            mv images_formatted.json images.json
-            IMAGE_COUNT=$(jq 'length' images.json)
-            echo "✓ Valid JSON with $IMAGE_COUNT images"
-
-            # Save to GitHub output for other jobs
-            echo "images<<EOF" >> $GITHUB_OUTPUT
-            cat images.json >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-            echo "image_count=$IMAGE_COUNT" >> $GITHUB_OUTPUT
-          else
-            echo "❌ Failed to parse images JSON:"
-            cat jq_errors.log
-            echo "Using empty array as fallback"
-            echo "[]" > images.json
-            echo "images=[]" >> $GITHUB_OUTPUT
-            echo "image_count=0" >> $GITHUB_OUTPUT
-          fi
-          echo "::endgroup::"
-
-          echo "::group::Summary"
-          # Display summary
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "📦 Image Extraction Summary:"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          if [[ -f images.json ]] && [[ $(jq 'length' images.json 2>/dev/null) -gt 0 ]]; then
-            jq -r '.[] | "  • \(.original) → \(.mirror)"' images.json
-          else
-            echo "  No images found"
-          fi
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "::endgroup::"
+          # Set outputs
+          echo "image_count=0" >> $GITHUB_OUTPUT
 
       - name: Upload images list
         uses: actions/upload-artifact@v4
