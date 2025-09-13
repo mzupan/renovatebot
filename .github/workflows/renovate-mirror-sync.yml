@@ -89,76 +89,27 @@ jobs:
           echo "charts=$CHARTS" >> $GITHUB_OUTPUT
           echo "Found charts: $CHARTS"
 
+      - name: Checkout scripts
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            scripts/extract-images.sh
+          sparse-checkout-cone-mode: false
+
       - name: Extract Docker images from charts
         id: extract
         run: |
-          # Create script to extract images
-          cat > extract_images.sh << 'EOF'
-          #!/bin/bash
-          set -e
+          # Make script executable
+          chmod +x scripts/extract-images.sh
 
-          IMAGES_JSON="[]"
-          CHARTS="${1}"
-
-          for chart in $CHARTS; do
-            echo "Processing chart: $chart"
-
-            # Update dependencies if needed
-            if [[ -f "$chart/Chart.lock" ]]; then
-              helm dependency update "$chart" 2>/dev/null || true
-            fi
-
-            # Run helm template and extract images
-            TEMPLATE_OUTPUT=$(helm template test-release "$chart" 2>/dev/null || echo "")
-
-            # Extract image references from the template output
-            IMAGES_FROM_TEMPLATE=$(echo "$TEMPLATE_OUTPUT" | grep -oE 'image:\s*"?[^"[:space:]]+' | sed 's/image:\s*"*//' | sort -u)
-
-            # Also check values files for image definitions
-            if [[ -f "$chart/values.yaml" ]]; then
-              IMAGES_FROM_VALUES=$(grep -oE 'repository:\s*[^[:space:]]+|image:\s*[^[:space:]]+|tag:\s*[^[:space:]]+' "$chart/values.yaml" 2>/dev/null | sed 's/.*:\s*//' || echo "")
-            fi
-
-            # Combine and process images
-            ALL_IMAGES=$(echo -e "$IMAGES_FROM_TEMPLATE\n$IMAGES_FROM_VALUES" | sort -u | grep -v '^$' || echo "")
-
-            for img in $ALL_IMAGES; do
-              # Skip if it's just a tag
-              if [[ ! "$img" =~ ^[0-9]+\.|^v[0-9]+|^latest$|^stable$ ]]; then
-                # Clean up the image string
-                img=$(echo "$img" | sed 's/"//g' | sed 's/{{.*}}//')
-
-                # Skip template variables
-                if [[ ! "$img" =~ \{\{ && ! -z "$img" ]]; then
-                  # Build full image reference if needed
-                  if [[ ! "$img" =~ : ]]; then
-                    img="$img:latest"
-                  fi
-
-                  # Add to JSON array with metadata
-                  IMAGES_JSON=$(echo "$IMAGES_JSON" | jq --arg img "$img" --arg chart "$chart" \
-                    '. += [{
-                      "original": $img,
-                      "mirror": (env.MIRROR_REGISTRY + "/" + env.MIRROR_PREFIX + "/" + ($img | split("/") | join("_"))),
-                      "chart": $chart,
-                      "selected": false
-                    }]')
-                fi
-              fi
-            done
-          done
-
-          # Remove duplicates based on original image
-          IMAGES_JSON=$(echo "$IMAGES_JSON" | jq 'unique_by(.original)')
-          echo "$IMAGES_JSON"
-          EOF
-
-          chmod +x extract_images.sh
-
-          # Extract images
+          # Run extraction script with debug enabled for visibility
+          export DEBUG=true
           export MIRROR_REGISTRY="${{ env.MIRROR_REGISTRY }}"
           export MIRROR_PREFIX="${{ env.MIRROR_PREFIX }}"
-          IMAGES_JSON=$(./extract_images.sh "${{ steps.changes.outputs.charts }}")
+          export OUTPUT_FORMAT=json
+
+          # Extract images from changed charts
+          IMAGES_JSON=$(scripts/extract-images.sh ${{ steps.changes.outputs.charts }})
 
           # Save to output
           echo "images<<EOF" >> $GITHUB_OUTPUT
@@ -167,6 +118,10 @@ jobs:
 
           # Also save to artifact for debugging
           echo "$IMAGES_JSON" | jq '.' > images.json
+
+          # Log summary
+          IMAGE_COUNT=$(echo "$IMAGES_JSON" | jq 'length')
+          echo "Found $IMAGE_COUNT unique images"
 
       - name: Upload images list
         uses: actions/upload-artifact@v4
