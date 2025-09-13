@@ -1,5 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "commitMessagePrefix": "[DEVOPS-1094]",
   "extends": [
     "config:recommended",
     ":dependencyDashboard"
