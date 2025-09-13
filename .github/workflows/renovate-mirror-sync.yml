@@ -169,8 +169,9 @@ jobs:
           export MIRROR_REGISTRY="${{ env.MIRROR_REGISTRY }}"
           export MIRROR_PREFIX="${{ env.MIRROR_PREFIX }}"
 
-          # Process each chart inline
-          echo "[]" > images_temp.json
+          # Initialize JSON array
+          ALL_IMAGES=""
+          IMAGE_COUNT=0
 
           for chart in $CHARTS; do
             echo "Processing chart: $chart"
@@ -216,22 +217,37 @@ jobs:
 
                 echo "Image: $img -> $MIRROR_PATH"
 
-                # Add to JSON (simple append)
-                echo "Processing: $img"
+                # Add to our list
+                if [[ $IMAGE_COUNT -gt 0 ]]; then
+                  ALL_IMAGES="$ALL_IMAGES,"
+                fi
+                ALL_IMAGES="$ALL_IMAGES
+  {
+    \"original\": \"$img\",
+    \"mirror\": \"$MIRROR_PATH\",
+    \"chart\": \"$chart\",
+    \"selected\": false
+  }"
+                ((IMAGE_COUNT++))
               fi
             done
           done
 
-          # Create final JSON manually
-          cat > images.json << 'EOF'
-          []
-          EOF
+          # Create final JSON
+          if [[ $IMAGE_COUNT -gt 0 ]]; then
+            cat > images.json << EOF
+[$ALL_IMAGES
+]
+EOF
+          else
+            echo "[]" > images.json
+          fi
 
           echo "Final images.json:"
           cat images.json
 
           # Set outputs
-          echo "image_count=0" >> $GITHUB_OUTPUT
+          echo "image_count=$IMAGE_COUNT" >> $GITHUB_OUTPUT
 
       - name: Upload images list
         uses: actions/upload-artifact@v4
