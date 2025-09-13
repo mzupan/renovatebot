@@ -151,6 +151,8 @@ main() {
     local charts="$*"
     local all_images=()
     local processed_images=()
+    local charts_processed=0
+    local charts_skipped=0
 
     if [[ -z "$charts" ]]; then
         error "No charts specified"
@@ -171,9 +173,12 @@ main() {
                 debug "Using relative path: $chart"
             else
                 warn "Skipping non-existent directory: $chart (pwd: $(pwd))"
+                ((charts_skipped++))
                 continue
             fi
         fi
+
+        ((charts_processed++))
 
         # Extract images from this chart
         local chart_images
@@ -187,6 +192,16 @@ main() {
             done <<< "$chart_images"
         fi
     done
+
+    # Check if all charts were skipped
+    if [[ $charts_processed -eq 0 ]]; then
+        error "All specified charts were skipped or not found"
+        if [[ "$OUTPUT_FORMAT" == "json" ]]; then
+            echo "[]"
+        fi
+        info "Charts processed: $charts_processed, Charts skipped: $charts_skipped"
+        return 1
+    fi
 
     # Remove duplicates and format output
     local unique_images=""
@@ -223,7 +238,10 @@ EOF
     fi
 
     # Summary to stderr
-    local count=$(echo "$unique_images" | grep -c '^' || echo 0)
+    local count=0
+    if [[ -n "$unique_images" ]]; then
+        count=$(echo "$unique_images" | grep -c '^[^[:space:]]' || echo 0)
+    fi
     info "Found $count unique images across all charts"
 }
 
