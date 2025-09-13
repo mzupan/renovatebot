@@ -69,25 +69,67 @@ jobs:
           CHARTS=""
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             # Get changed files between base and head
-            CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+            echo "Checking for changed files in PR..."
+            CHANGED_FILES=$(git diff --name-only origin/${{ github.base_ref }}...HEAD || true)
+            echo "Changed files:"
+            echo "$CHANGED_FILES"
           else
             # For manual trigger, check all charts
+            echo "Manual trigger - checking all charts..."
             CHANGED_FILES=$(find . -name "Chart.yaml" | sed 's|/Chart.yaml||' | sed 's|^./||')
           fi
 
           for file in $CHANGED_FILES; do
-            # Check if it's a chart directory
-            if [[ -f "$(dirname $file)/Chart.yaml" ]] || [[ -f "$file/Chart.yaml" ]]; then
-              CHART_DIR=$(dirname $file)
-              [[ -f "$file/Chart.yaml" ]] && CHART_DIR=$file
-              CHARTS="$CHARTS $CHART_DIR"
+            # Skip empty lines
+            [[ -z "$file" ]] && continue
+
+            # Check if it's a chart directory or file within a chart directory
+            POTENTIAL_DIRS=""
+
+            # If it's a Chart.yaml file itself
+            if [[ "$file" == *"Chart.yaml" ]]; then
+              POTENTIAL_DIRS="$(dirname "$file")"
+            # If it's a file, check parent directories for Chart.yaml
+            elif [[ -f "$file" ]]; then
+              DIR="$(dirname "$file")"
+              while [[ "$DIR" != "." && "$DIR" != "/" ]]; do
+                if [[ -f "$DIR/Chart.yaml" ]]; then
+                  POTENTIAL_DIRS="$POTENTIAL_DIRS $DIR"
+                  break
+                fi
+                DIR="$(dirname "$DIR")"
+              done
+            # If it's a directory, check if it contains Chart.yaml
+            elif [[ -d "$file" ]]; then
+              if [[ -f "$file/Chart.yaml" ]]; then
+                POTENTIAL_DIRS="$file"
+              fi
             fi
+
+            for dir in $POTENTIAL_DIRS; do
+              if [[ -f "$dir/Chart.yaml" ]]; then
+                echo "Found chart: $dir"
+                CHARTS="$CHARTS $dir"
+              fi
+            done
           done
 
-          # Remove duplicates
-          CHARTS=$(echo $CHARTS | tr ' ' '\n' | sort -u | tr '\n' ' ')
+          # Remove duplicates and clean up
+          if [[ -n "$CHARTS" ]]; then
+            CHARTS=$(echo $CHARTS | tr ' ' '\n' | sort -u | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+          fi
+
           echo "charts=$CHARTS" >> $GITHUB_OUTPUT
-          echo "Found charts: $CHARTS"
+          echo "Final charts list: '$CHARTS'"
+
+          # List charts for verification
+          for chart in $CHARTS; do
+            if [[ -d "$chart" ]]; then
+              echo "✓ Chart directory exists: $chart"
+            else
+              echo "✗ Chart directory missing: $chart"
+            fi
+          done
 
       - name: Extract Docker images from charts
         id: extract

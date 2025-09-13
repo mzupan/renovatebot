@@ -195,12 +195,13 @@ main() {
 
     # Check if all charts were skipped
     if [[ $charts_processed -eq 0 ]]; then
-        error "All specified charts were skipped or not found"
+        warn "All specified charts were skipped or not found"
         if [[ "$OUTPUT_FORMAT" == "json" ]]; then
             echo "[]"
         fi
         info "Charts processed: $charts_processed, Charts skipped: $charts_skipped"
-        return 1
+        # Don't fail - just return empty results
+        return 0
     fi
 
     # Remove duplicates and format output
