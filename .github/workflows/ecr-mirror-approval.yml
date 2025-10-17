@@ -96,34 +96,35 @@ jobs:
         run: |
           PR_NUM="${{ steps.pr-number.outputs.number }}"
 
-          # Try to read images from artifact
-          if [[ -f /tmp/artifacts/images.txt ]]; then
-            IMAGES=$(cat /tmp/artifacts/images.txt)
-            echo "Using images from artifact"
-          else
-            echo "No artifact found, posting generic confirmation"
-            IMAGES=""
-          fi
-
           cat > /tmp/mirror-confirmation.md <<'EOF'
           ## ✅ ECR Mirroring Complete
 
           All Docker images have been successfully mirrored to ECR:
+
+          ### Mirrored Images by Chart
+
           EOF
 
-          if [[ -n "$IMAGES" ]]; then
-            cat >> /tmp/mirror-confirmation.md <<'EOF'
+          # Try to read chart images JSON from artifact
+          if [[ -f /tmp/artifacts/chart_images.json ]]; then
+            echo "Using chart images from artifact"
 
-          | Original Image | ECR Mirror Location |
-          |---------------|---------------------|
-          EOF
-
-            while IFS= read -r image; do
-              if [[ -n "$image" ]]; then
-                ECR_IMAGE="${ECR_REGISTRY}/${ECR_PREFIX}/${image}"
-                echo "| \`${image}\` | \`${ECR_IMAGE}\` |" >> /tmp/mirror-confirmation.md
+            # Group images by chart - process line by line to avoid subshell issues
+            CURRENT_CHART=""
+            while IFS='|' read -r chart image; do
+              if [[ "$chart" != "$CURRENT_CHART" ]]; then
+                echo "" >> /tmp/mirror-confirmation.md
+                echo "**\`$chart\`**" >> /tmp/mirror-confirmation.md
+                echo "" >> /tmp/mirror-confirmation.md
+                echo "| Original Image | ECR Mirror Location |" >> /tmp/mirror-confirmation.md
+                echo "|---------------|---------------------|" >> /tmp/mirror-confirmation.md
+                CURRENT_CHART="$chart"
               fi
-            done <<< "$IMAGES"
+              ECR_IMAGE="${ECR_REGISTRY}/${ECR_PREFIX}/${image}"
+              echo "| \`${image}\` | \`${ECR_IMAGE}\` |" >> /tmp/mirror-confirmation.md
+            done < <(cat /tmp/artifacts/chart_images.json | jq -r '.[] | "\(.chart)|\(.image)"')
+          else
+            echo "No artifact found, posting generic confirmation"
           fi
 
           cat >> /tmp/mirror-confirmation.md <<'EOF'
