@@ -59,7 +59,9 @@ jobs:
         if: steps.changed-files.outputs.has_charts == 'true'
         id: extract-images
         run: |
-          ALL_IMAGES=""
+          # Initialize arrays to store chart-specific data
+          > /tmp/chart_images.json
+          echo "[]" > /tmp/chart_images.json
 
           while IFS= read -r chart_file; do
             if [[ -z "$chart_file" ]]; then
@@ -95,7 +97,13 @@ jobs:
             if [[ -n "$IMAGES" ]]; then
               echo "Found images in $CHART_DIR:"
               echo "$IMAGES"
-              ALL_IMAGES="${ALL_IMAGES}${IMAGES}"$'\n'
+
+              # Store chart path and images in JSON format
+              while IFS= read -r image; do
+                if [[ -n "$image" ]]; then
+                  echo "{\"chart\": \"$chart_file\", \"image\": \"$image\"}" >> /tmp/chart_images_raw.txt
+                fi
+              done <<< "$IMAGES"
             else
               echo "No images found in $CHART_DIR"
             fi
@@ -103,20 +111,22 @@ jobs:
             cd "$GITHUB_WORKSPACE"
           done < /tmp/chart_files.txt
 
-          # Remove duplicates and empty lines
-          UNIQUE_IMAGES=$(echo "$ALL_IMAGES" | sort -u | grep -v '^$' || true)
-
-          if [[ -z "$UNIQUE_IMAGES" ]]; then
+          # Check if we found any images
+          if [[ ! -f /tmp/chart_images_raw.txt ]]; then
             echo "No images found"
             echo "has_images=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          echo "All unique images found:"
-          echo "$UNIQUE_IMAGES"
+          # Convert to proper JSON array
+          jq -s '.' /tmp/chart_images_raw.txt > /tmp/chart_images.json
 
-          # Save images to file
-          echo "$UNIQUE_IMAGES" > /tmp/images.txt
+          echo "All chart images (with sources):"
+          cat /tmp/chart_images.json | jq -r '.[] | "\(.chart): \(.image)"'
+
+          # Also create a simple list for backward compatibility
+          cat /tmp/chart_images.json | jq -r '.[].image' | sort -u > /tmp/images.txt
+
           echo "has_images=true" >> $GITHUB_OUTPUT
 
       - name: Save images as artifact
@@ -124,7 +134,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: docker-images-pr-${{ github.event.pull_request.number }}
-          path: /tmp/images.txt
+          path: |
+            /tmp/images.txt
+            /tmp/chart_images.json
           retention-days: 30
 
       - name: Comment on PR
@@ -136,26 +148,30 @@ jobs:
         run: |
           PR_NUM="${{ github.event.pull_request.number }}"
 
-          # Read images from file
-          IMAGES=$(cat /tmp/images.txt)
-
           # Build comment body
           cat > /tmp/comment.md <<'EOF'
           ## 🐳 Docker Images Detected
 
           The following Docker images were found in the Helm charts and will be mirrored to ECR:
 
-          | Original Image | ECR Mirror Destination |
-          |---------------|------------------------|
+          ### Images by Chart
+
           EOF
 
-          # Process each image and add ECR destination
-          while IFS= read -r image; do
-            if [[ -n "$image" ]]; then
-              ECR_IMAGE="${ECR_REGISTRY}/${ECR_PREFIX}/${image}"
-              echo "| \`${image}\` | \`${ECR_IMAGE}\` |" >> /tmp/comment.md
+          # Group images by chart - process line by line to avoid subshell issues
+          CURRENT_CHART=""
+          while IFS='|' read -r chart image; do
+            if [[ "$chart" != "$CURRENT_CHART" ]]; then
+              echo "" >> /tmp/comment.md
+              echo "**\`$chart\`**" >> /tmp/comment.md
+              echo "" >> /tmp/comment.md
+              echo "| Original Image | ECR Mirror Destination |" >> /tmp/comment.md
+              echo "|---------------|------------------------|" >> /tmp/comment.md
+              CURRENT_CHART="$chart"
             fi
-          done <<< "$IMAGES"
+            ECR_IMAGE="${ECR_REGISTRY}/${ECR_PREFIX}/${image}"
+            echo "| \`${image}\` | \`${ECR_IMAGE}\` |" >> /tmp/comment.md
+          done < <(cat /tmp/chart_images.json | jq -r '.[] | "\(.chart)|\(.image)"')
 
           cat >> /tmp/comment.md <<'EOF'
 
