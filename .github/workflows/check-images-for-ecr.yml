@@ -165,13 +165,13 @@ jobs:
 
           **DO NOT MERGE THIS PR YET**
 
-          Once this PR receives **1 +1 reaction** and is merged, the image(s) above will be automatically mirrored to ECR.
+          Once this PR receives **1 approval review**, the image(s) above will be automatically mirrored to ECR.
 
           After the mirroring process completes, another automated comment will be posted confirming that it is safe to merge this PR.
 
           ### Next Steps
           1. Review the images above
-          2. Add +1 reaction to approve mirroring
+          2. Approve this PR to trigger mirroring
           3. Wait for automated mirroring confirmation
           4. Merge once confirmed safe
 
