@@ -123,6 +123,8 @@ jobs:
         if: steps.extract-images.outputs.has_images == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          ECR_REGISTRY: "844513065301.dkr.ecr.us-east-1.amazonaws.com"
+          ECR_PREFIX: "mirror"
         run: |
           PR_NUM="${{ github.event.pull_request.number }}"
 
@@ -133,19 +135,45 @@ jobs:
           cat > /tmp/comment.md <<'EOF'
           ## 🐳 Docker Images Detected
 
-          The following Docker images were found in the Helm charts. You may need to mirror these to your local ECR:
+          The following Docker images were found in the Helm charts and need to be mirrored to ECR:
 
-          ```
+          | Original Image | ECR Mirror Destination |
+          |---------------|------------------------|
           EOF
 
-          echo "$IMAGES" >> /tmp/comment.md
+          # Process each image and add ECR destination
+          while IFS= read -r image; do
+            if [[ -n "$image" ]]; then
+              ECR_IMAGE="${ECR_REGISTRY}/${ECR_PREFIX}/${image}"
+              echo "| \`${image}\` | \`${ECR_IMAGE}\` |" >> /tmp/comment.md
+            fi
+          done <<< "$IMAGES"
+
+          cat >> /tmp/comment.md <<EOF
+
+          ### Mirror Commands
+          \`\`\`bash
+          # Pull, tag, and push each image to ECR
+          EOF
+
+          while IFS= read -r image; do
+            if [[ -n "$image" ]]; then
+              ECR_IMAGE="${ECR_REGISTRY}/${ECR_PREFIX}/${image}"
+              cat >> /tmp/comment.md <<CMDEOF
+          docker pull ${image}
+          docker tag ${image} ${ECR_IMAGE}
+          docker push ${ECR_IMAGE}
+
+          CMDEOF
+            fi
+          done <<< "$IMAGES"
 
           cat >> /tmp/comment.md <<'EOF'
           ```
 
           ### Next Steps
           1. Review the images above
-          2. Mirror required images to your ECR repository
+          2. Run the mirror commands to push images to ECR
           3. Update the chart values to use ECR image paths if needed
 
           ---
