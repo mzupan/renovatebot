@@ -1,0 +1,111 @@
+name: Mirror PR for Testing
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    # Only trigger for Renovate PRs or add your own filters
+    branches:
+      - main
+
+jobs:
+  mirror-pr:
+    # Only run for bot PRs (like Renovate)
+    if: github.actor == 'renovate[bot]' || contains(github.event.pull_request.title, '[TEST]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Get PR details
+        id: pr-details
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUM="${{ github.event.pull_request.number }}"
+
+          # Get PR metadata
+          PR_DATA=$(gh pr view $PR_NUM --json title,body,headRefName,baseRefName)
+          TITLE=$(echo "$PR_DATA" | jq -r '.title')
+          HEAD_BRANCH=$(echo "$PR_DATA" | jq -r '.headRefName')
+          BASE_BRANCH=$(echo "$PR_DATA" | jq -r '.baseRefName')
+
+          # Export for later steps
+          echo "title=$TITLE" >> $GITHUB_OUTPUT
+          echo "head_branch=$HEAD_BRANCH" >> $GITHUB_OUTPUT
+          echo "base_branch=$BASE_BRANCH" >> $GITHUB_OUTPUT
+          echo "test_branch=test/${HEAD_BRANCH}-${GITHUB_RUN_NUMBER}" >> $GITHUB_OUTPUT
+
+      - name: Create test branch and apply diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUM="${{ github.event.pull_request.number }}"
+          TEST_BRANCH="${{ steps.pr-details.outputs.test_branch }}"
+          BASE_BRANCH="${{ steps.pr-details.outputs.base_branch }}"
+
+          # Create test branch
+          git checkout -b $TEST_BRANCH origin/$BASE_BRANCH
+
+          # Apply the diff
+          gh pr diff $PR_NUM | git apply || {
+            echo "Failed to apply diff, trying with 3-way merge"
+            gh pr diff $PR_NUM | git apply --3way
+          }
+
+          # Commit if there are changes
+          if [[ -n $(git status -s) ]]; then
+            git add -A
+            git commit -m "Test: ${{ steps.pr-details.outputs.title }}
+
+            Original PR: #$PR_NUM
+
+            🤖 Auto-generated test PR"
+
+            # Push test branch
+            git push origin $TEST_BRANCH
+          else
+            echo "No changes to commit"
+            exit 0
+          fi
+
+      - name: Create test PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUM="${{ github.event.pull_request.number }}"
+          TEST_BRANCH="${{ steps.pr-details.outputs.test_branch }}"
+          BASE_BRANCH="${{ steps.pr-details.outputs.base_branch }}"
+          ORIGINAL_BODY="${{ github.event.pull_request.body }}"
+
+          # Create test PR body
+          cat > pr-body.txt <<EOF
+          🧪 **Automated Test PR for #$PR_NUM**
+
+          ## Original PR Details
+          $ORIGINAL_BODY
+
+          ---
+          **Original PR**: #$PR_NUM
+          **Test Branch**: \`$TEST_BRANCH\`
+          **Workflow Run**: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          🤖 This test PR will be automatically updated when the original PR changes.
+          EOF
+
+          # Create PR
+          gh pr create \
+            --title "TEST: ${{ steps.pr-details.outputs.title }}" \
+            --body-file pr-body.txt \
+            --base $BASE_BRANCH \
+            --head $TEST_BRANCH

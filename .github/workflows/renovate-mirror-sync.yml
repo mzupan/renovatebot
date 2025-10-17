@@ -218,24 +218,15 @@ jobs:
                 if [[ $IMAGE_COUNT -gt 0 ]]; then
                   ALL_IMAGES="$ALL_IMAGES,"
                 fi
-                ALL_IMAGES="$ALL_IMAGES
-  {
-    \"original\": \"$img\",
-    \"mirror\": \"$MIRROR_PATH\",
-    \"chart\": \"$chart\",
-    \"selected\": false
-  }"
-                ((IMAGE_COUNT++))
+                ALL_IMAGES="$ALL_IMAGES{\"original\": \"$img\", \"mirror\": \"$MIRROR_PATH\", \"chart\": \"$chart\", \"selected\": false}"
+                IMAGE_COUNT=$((IMAGE_COUNT + 1))
               fi
             done
           done
 
           # Create final JSON
           if [[ $IMAGE_COUNT -gt 0 ]]; then
-            cat > images.json << EOF
-[$ALL_IMAGES
-]
-EOF
+            echo "[$ALL_IMAGES]" > images.json
           else
             echo "[]" > images.json
           fi

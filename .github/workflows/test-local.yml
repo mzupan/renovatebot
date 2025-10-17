@@ -1,0 +1,124 @@
+name: Test Local
+
+on:
+  workflow_dispatch:
+    inputs:
+      charts:
+        description: 'Charts to test'
+        required: false
+        default: 'envs/dev/reloader'
+
+jobs:
+  test-extract:
+    runs-on: ubuntu-latest
+    env:
+      MIRROR_REGISTRY: registry.internal.company.com
+      MIRROR_PREFIX: dockerhub
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Install jq
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Test extract images
+        run: |
+          set -x
+
+          CHARTS="${{ github.event.inputs.charts }}"
+          export MIRROR_REGISTRY="${{ env.MIRROR_REGISTRY }}"
+          export MIRROR_PREFIX="${{ env.MIRROR_PREFIX }}"
+
+          echo "Processing charts: $CHARTS"
+
+          # Check charts exist
+          for chart in $CHARTS; do
+            echo "Checking chart: $chart"
+            if [[ -d "$chart" ]]; then
+              echo "Chart directory exists: $chart"
+              ls -la "$chart/"
+              echo "Chart.yaml:"
+              cat "$chart/Chart.yaml" || echo "No Chart.yaml"
+              echo "values.yaml:"
+              cat "$chart/values.yaml" || echo "No values.yaml"
+            else
+              echo "Chart directory NOT found: $chart"
+            fi
+          done
+
+          # Initialize JSON array
+          ALL_IMAGES=""
+          IMAGE_COUNT=0
+
+          for chart in $CHARTS; do
+            echo "Processing chart: $chart"
+
+            # Check if chart has dependencies and build them
+            if [[ -f "$chart/Chart.yaml" ]] && grep -q "dependencies:" "$chart/Chart.yaml"; then
+              echo "Chart has dependencies, building..."
+              cd "$chart"
+              helm dependency build . || echo "Failed to build dependencies"
+              cd -
+            fi
+
+            # Run helm template
+            echo "Running helm template..."
+            TEMPLATE_OUTPUT=$(helm template test-release "$chart" 2>/dev/null || echo "TEMPLATE_FAILED")
+
+            if [[ "$TEMPLATE_OUTPUT" == "TEMPLATE_FAILED" ]]; then
+              echo "Helm template failed for $chart"
+              continue
+            fi
+
+
+            # Extract images from template output
+            echo "Extracting images..."
+            FOUND_IMAGES=$(echo "$TEMPLATE_OUTPUT" | grep -E 'image:' | sed 's/.*image:[[:space:]]*//' | sed 's/"//g' | sed "s/'//g" | sort -u || echo "")
+
+            echo "Found images:"
+            echo "$FOUND_IMAGES"
+
+            # Process each image
+            for img in $FOUND_IMAGES; do
+              if [[ -n "$img" ]] && [[ ! "$img" =~ \{\{ ]]; then
+                # Add tag if missing
+                if [[ ! "$img" =~ : ]]; then
+                  img="$img:latest"
+                fi
+
+                # Build mirror path
+                MIRROR_PATH="${MIRROR_REGISTRY}/${MIRROR_PREFIX}/$(echo "$img" | sed 's|/|_|g')"
+
+                echo "Image: $img -> $MIRROR_PATH"
+
+                # Add to our list
+                if [[ $IMAGE_COUNT -gt 0 ]]; then
+                  ALL_IMAGES="$ALL_IMAGES,"
+                fi
+                ALL_IMAGES="$ALL_IMAGES{\"original\": \"$img\", \"mirror\": \"$MIRROR_PATH\", \"chart\": \"$chart\", \"selected\": false}"
+                IMAGE_COUNT=$((IMAGE_COUNT + 1))
+              fi
+            done
+          done
+
+          # Create final JSON
+          if [[ $IMAGE_COUNT -gt 0 ]]; then
+            echo "[$ALL_IMAGES]" > images.json
+          else
+            echo "[]" > images.json
+          fi
+
+          echo "Final images.json:"
+          cat images.json || echo "Failed to read images.json"
+
+          echo "Image count: $IMAGE_COUNT"
+
+          # Ensure we exit successfully
+          exit 0
