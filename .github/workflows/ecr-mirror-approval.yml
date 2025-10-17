@@ -23,6 +23,9 @@ jobs:
       checks: write
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Get PR number
         id: pr-number
         run: |
@@ -91,21 +94,54 @@ jobs:
             echo "No confirmation posted yet"
           fi
 
+      - name: Download images artifact
+        if: steps.check-approvals.outputs.approved == 'true' && steps.check-confirmation.outputs.already_posted == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-images-pr-${{ steps.pr-number.outputs.number }}
+          path: /tmp/artifacts
+        continue-on-error: true
+
       - name: Post mirroring confirmation
         if: steps.check-approvals.outputs.approved == 'true' && steps.check-confirmation.outputs.already_posted == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
+          ECR_REGISTRY: "844513065301.dkr.ecr.us-east-1.amazonaws.com"
+          ECR_PREFIX: "mirror"
         run: |
           PR_NUM="${{ steps.pr-number.outputs.number }}"
+
+          # Try to read images from artifact
+          if [[ -f /tmp/artifacts/images.txt ]]; then
+            IMAGES=$(cat /tmp/artifacts/images.txt)
+            echo "Using images from artifact"
+          else
+            echo "No artifact found, posting generic confirmation"
+            IMAGES=""
+          fi
 
           cat > /tmp/mirror-confirmation.md <<'EOF'
           ## ✅ ECR Mirroring Complete
 
           All Docker images have been successfully mirrored to ECR:
+          EOF
 
-          - 🐳 Images pulled from upstream registries
-          - 🏷️ Tagged for ECR repository
-          - ⬆️ Pushed to `844513065301.dkr.ecr.us-east-1.amazonaws.com/mirror/`
+          if [[ -n "$IMAGES" ]]; then
+            cat >> /tmp/mirror-confirmation.md <<'EOF'
+
+          | Original Image | ECR Mirror Location |
+          |---------------|---------------------|
+          EOF
+
+            while IFS= read -r image; do
+              if [[ -n "$image" ]]; then
+                ECR_IMAGE="${ECR_REGISTRY}/${ECR_PREFIX}/${image}"
+                echo "| \`${image}\` | \`${ECR_IMAGE}\` |" >> /tmp/mirror-confirmation.md
+              fi
+            done <<< "$IMAGES"
+          fi
+
+          cat >> /tmp/mirror-confirmation.md <<'EOF'
 
           ### Status
           - ✅ Mirroring: **COMPLETE**

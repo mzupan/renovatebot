@@ -119,6 +119,14 @@ jobs:
           echo "$UNIQUE_IMAGES" > /tmp/images.txt
           echo "has_images=true" >> $GITHUB_OUTPUT
 
+      - name: Save images as artifact
+        if: steps.extract-images.outputs.has_images == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-images-pr-${{ github.event.pull_request.number }}
+          path: /tmp/images.txt
+          retention-days: 30
+
       - name: Comment on PR
         if: steps.extract-images.outputs.has_images == 'true'
         env:
