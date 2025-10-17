@@ -62,21 +62,14 @@ jobs:
             PLUS_ONE_COUNT=$((PLUS_ONE_COUNT + COMMENT_REACTIONS))
           done
 
-          # Also check for "+1" text in comments (for testing when you can't react to your own PR)
-          PLUS_ONE_COMMENTS=$(gh api "/repos/$REPO/issues/$PR_NUM/comments" --jq '[.[] | select(.body | test("^\\+1$|^\\+1\\s|\\s\\+1$|\\s\\+1\\s"))] | length')
-
-          echo "Found $PLUS_ONE_COMMENTS comments with +1 text"
-
-          PLUS_ONE_COUNT=$((PLUS_ONE_COUNT + PLUS_ONE_COMMENTS))
-
-          echo "Total approvals found (reactions + comments): $PLUS_ONE_COUNT"
+          echo "Total +1 reactions found: $PLUS_ONE_COUNT"
 
           if [[ $PLUS_ONE_COUNT -ge 1 ]]; then
             echo "approved=true" >> $GITHUB_OUTPUT
             echo "✅ PR has required approvals"
           else
             echo "approved=false" >> $GITHUB_OUTPUT
-            echo "❌ PR needs at least 1 +1 reaction or comment"
+            echo "❌ PR needs at least 1 +1 reaction"
           fi
 
       - name: Check if mirroring confirmation already posted
