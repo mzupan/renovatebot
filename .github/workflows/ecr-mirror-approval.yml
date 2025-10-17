@@ -91,7 +91,7 @@ jobs:
         if: steps.check-approvals.outputs.approved == 'true' && steps.check-confirmation.outputs.already_posted == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
-          ECR_REGISTRY: "844513065301.dkr.ecr.us-east-1.amazonaws.com"
+          ECR_REGISTRY: "123456789012.dkr.ecr.us-east-1.amazonaws.com"
           ECR_PREFIX: "mirror"
         run: |
           PR_NUM="${{ steps.pr-number.outputs.number }}"

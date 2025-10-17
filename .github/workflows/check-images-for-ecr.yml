@@ -131,7 +131,7 @@ jobs:
         if: steps.extract-images.outputs.has_images == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          ECR_REGISTRY: "844513065301.dkr.ecr.us-east-1.amazonaws.com"
+          ECR_REGISTRY: "123456789012.dkr.ecr.us-east-1.amazonaws.com"
           ECR_PREFIX: "mirror"
         run: |
           PR_NUM="${{ github.event.pull_request.number }}"
