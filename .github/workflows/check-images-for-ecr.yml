@@ -26,6 +26,9 @@ jobs:
         with:
           version: 'latest'
 
+      - name: Setup yq
+        uses: mikefarah/yq@master
+
       - name: Get changed files
         id: changed-files
         env:
@@ -78,7 +81,16 @@ jobs:
 
             # Template the chart and extract images
             echo "Running helm template to extract images..."
-            IMAGES=$(helm template . 2>/dev/null | grep -oP '(?<=image:\s)[^"\s]+' | sort -u || true)
+
+            # Use yq to properly parse YAML and extract image fields
+            # This handles both quoted and unquoted images
+            IMAGES=$(helm template . 2>/dev/null | yq eval '.. | select(has("image")) | .image' - 2>/dev/null | grep -v '^null$' | sort -u || true)
+
+            # Fallback to grep if yq doesn't find anything
+            if [[ -z "$IMAGES" ]]; then
+              echo "Trying fallback grep method..."
+              IMAGES=$(helm template . 2>/dev/null | grep -E '^\s*-?\s*image:\s*' | sed -E 's/.*image:\s*"?([^"]+)"?.*/\1/' | sort -u || true)
+            fi
 
             if [[ -n "$IMAGES" ]]; then
               echo "Found images in $CHART_DIR:"
