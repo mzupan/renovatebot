@@ -47,32 +47,17 @@ jobs:
 
           echo "Checking PR #$PR_NUM for approvals..."
 
-          # Check for +1 reactions on PR body and comments
-          PLUS_ONE_COUNT=0
+          # Get PR reviews with APPROVED state
+          APPROVED_COUNT=$(gh api "/repos/$REPO/pulls/$PR_NUM/reviews" --jq '[.[] | select(.state == "APPROVED")] | length')
 
-          # Check reactions on PR issue
-          PR_REACTIONS=$(gh api "/repos/$REPO/issues/$PR_NUM/reactions" --jq '[.[] | select(.content == "+1")] | length')
-          PLUS_ONE_COUNT=$((PLUS_ONE_COUNT + PR_REACTIONS))
+          echo "Found $APPROVED_COUNT approved reviews"
 
-          echo "Found $PR_REACTIONS +1 reactions on PR body"
-
-          # Get all comments on the PR
-          COMMENTS=$(gh api "/repos/$REPO/issues/$PR_NUM/comments" --jq '.[].id')
-
-          # Check reactions on each comment
-          for comment_id in $COMMENTS; do
-            COMMENT_REACTIONS=$(gh api "/repos/$REPO/issues/comments/$comment_id/reactions" --jq '[.[] | select(.content == "+1")] | length')
-            PLUS_ONE_COUNT=$((PLUS_ONE_COUNT + COMMENT_REACTIONS))
-          done
-
-          echo "Total +1 reactions found: $PLUS_ONE_COUNT"
-
-          if [[ $PLUS_ONE_COUNT -ge 1 ]]; then
+          if [[ $APPROVED_COUNT -ge 1 ]]; then
             echo "approved=true" >> $GITHUB_OUTPUT
             echo "✅ PR has required approvals"
           else
             echo "approved=false" >> $GITHUB_OUTPUT
-            echo "❌ PR needs at least 1 +1 reaction"
+            echo "❌ PR needs at least 1 approval review"
           fi
 
       - name: Check if mirroring confirmation already posted
