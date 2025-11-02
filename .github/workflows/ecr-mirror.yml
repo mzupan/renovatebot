@@ -107,10 +107,15 @@ jobs:
               # This ensures we get upstream images, not our ECR mirrors
               echo "🧹 Removing ECR registry and mirror path references from base values file..."
 
+              # Debug: Show lines that will be removed
+              echo "Lines to be removed (matching ECR or mirror/):"
+              grep -E '(dkr\.ecr\.us-east-1\.amazonaws\.com|mirror/)' "$BASE_VALUES_FILE" || echo "No matching lines found"
+
               # Remove lines containing ECR registry URLs or mirror paths (in-place)
               sed -i.bak -e '/dkr\.ecr\.us-east-1\.amazonaws\.com/d' -e '/mirror\//d' "$BASE_VALUES_FILE"
 
               echo "Using modified base values file for templating (ECR mirrors removed)"
+              echo "Modified file line count: $(wc -l < "$BASE_VALUES_FILE") (was $(wc -l < "$BASE_VALUES_FILE.bak"))"
               HELM_TEMPLATE_ARGS="-f ${BASE_VALUES_FILE}"
             else
               echo "ℹ️  No base values file found at envs/base/${CHART_NAME}.yaml, using defaults"
@@ -133,6 +138,11 @@ jobs:
             # Template the chart and extract images
             echo "Running helm template to extract upstream images..."
             echo "Command: helm template . ${HELM_TEMPLATE_ARGS}"
+
+            # Debug: Show what helm template outputs
+            echo "=== Helm Template Output (first 100 lines) ==="
+            helm template . ${HELM_TEMPLATE_ARGS} 2>&1 | head -100 || echo "Helm template failed"
+            echo "=== End Helm Template Output ==="
 
             # Use yq to properly parse YAML and extract image fields
             # This handles both quoted and unquoted images
