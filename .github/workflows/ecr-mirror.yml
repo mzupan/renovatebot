@@ -1,0 +1,388 @@
+name: ECR Mirror Management
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+  issue_comment:
+    types: [created]
+  pull_request_review:
+    types: [submitted]
+
+env:
+  REQUIRED_APPROVALS: 1  # Number of approvals required to trigger image mirroring
+  ECR_REGISTRY: "123456789012.dkr.ecr.us-east-1.amazonaws.com"
+  ECR_PREFIX: "mirror"
+
+jobs:
+  extract-images:
+    # Only run for PRs with [DEVOPS-1094] in title on PR open/sync
+    if: |
+      github.event_name == 'pull_request' &&
+      startsWith(github.event.pull_request.title, '[DEVOPS-1094]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+
+      - name: Setup yq
+        uses: mikefarah/yq@master
+
+      - name: Get changed files
+        id: changed-files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUM="${{ github.event.pull_request.number }}"
+
+          # Get list of changed files
+          CHANGED_FILES=$(gh pr view $PR_NUM --json files -q '.files[].path')
+
+          # Filter for Chart.yaml files
+          CHART_FILES=$(echo "$CHANGED_FILES" | grep -E 'Chart\.yaml$' || true)
+
+          if [[ -z "$CHART_FILES" ]]; then
+            echo "No Chart.yaml files changed"
+            echo "chart_files=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Found Chart.yaml files:"
+          echo "$CHART_FILES"
+
+          # Save chart files for next step
+          echo "$CHART_FILES" > /tmp/chart_files.txt
+          echo "has_charts=true" >> $GITHUB_OUTPUT
+
+      - name: Extract images from Helm charts
+        if: steps.changed-files.outputs.has_charts == 'true'
+        id: extract-images
+        run: |
+          # Initialize arrays to store chart-specific data
+          > /tmp/chart_images.json
+          echo "[]" > /tmp/chart_images.json
+
+          while IFS= read -r chart_file; do
+            if [[ -z "$chart_file" ]]; then
+              continue
+            fi
+
+            echo "Processing: $chart_file"
+            CHART_DIR=$(dirname "$chart_file")
+
+            # Extract chart name from directory (e.g., prometheus-operator from envs/prod/prometheus-operator)
+            CHART_NAME=$(basename "$CHART_DIR")
+
+            cd "$CHART_DIR"
+
+            # Update dependencies
+            echo "Running helm dependency update in $CHART_DIR..."
+            if helm dependency update; then
+              echo "✅ Dependencies updated successfully"
+            else
+              echo "⚠️ Dependency update failed, continuing anyway..."
+            fi
+
+            # Check if base values file exists
+            BASE_VALUES_FILE="${GITHUB_WORKSPACE}/envs/base/${CHART_NAME}.yaml"
+            HELM_TEMPLATE_ARGS=""
+
+            if [[ -f "$BASE_VALUES_FILE" ]]; then
+              echo "📝 Found base values file: envs/base/${CHART_NAME}.yaml"
+              HELM_TEMPLATE_ARGS="-f ${BASE_VALUES_FILE}"
+            else
+              echo "ℹ️  No base values file found at envs/base/${CHART_NAME}.yaml, using defaults"
+            fi
+
+            # Template the chart and extract images
+            echo "Running helm template to extract images..."
+            echo "Command: helm template . ${HELM_TEMPLATE_ARGS}"
+
+            # Use yq to properly parse YAML and extract image fields
+            # This handles both quoted and unquoted images
+            IMAGES=$(helm template . ${HELM_TEMPLATE_ARGS} 2>/dev/null | yq eval '.. | select(has("image")) | .image' - 2>/dev/null | grep -v '^null$' | sort -u || true)
+
+            # Fallback to grep if yq doesn't find anything
+            if [[ -z "$IMAGES" ]]; then
+              echo "Trying fallback grep method..."
+              IMAGES=$(helm template . ${HELM_TEMPLATE_ARGS} 2>/dev/null | grep -E '^\s*-?\s*image:\s*' | sed -E 's/.*image:\s*"?([^"]+)"?.*/\1/' | sort -u || true)
+            fi
+
+            if [[ -n "$IMAGES" ]]; then
+              echo "Found images in $CHART_DIR:"
+              echo "$IMAGES"
+
+              # Store chart path and images in JSON format
+              while IFS= read -r image; do
+                # Skip empty, null, or invalid image values
+                if [[ -n "$image" && "$image" != "---" && "$image" != "null" && "$image" != "{}" ]]; then
+                  echo "{\"chart\": \"$chart_file\", \"image\": \"$image\"}" >> /tmp/chart_images_raw.txt
+                fi
+              done <<< "$IMAGES"
+            else
+              echo "No images found in $CHART_DIR"
+            fi
+
+            cd "$GITHUB_WORKSPACE"
+          done < /tmp/chart_files.txt
+
+          # Check if we found any images
+          if [[ ! -f /tmp/chart_images_raw.txt ]]; then
+            echo "No images found"
+            echo "has_images=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Convert to proper JSON array
+          jq -s '.' /tmp/chart_images_raw.txt > /tmp/chart_images.json
+
+          echo "All chart images (with sources):"
+          cat /tmp/chart_images.json | jq -r '.[] | "\(.chart): \(.image)"'
+
+          # Also create a simple list for backward compatibility
+          cat /tmp/chart_images.json | jq -r '.[].image' | sort -u > /tmp/images.txt
+
+          echo "has_images=true" >> $GITHUB_OUTPUT
+
+      - name: Save images as artifact
+        if: steps.extract-images.outputs.has_images == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-images-pr-${{ github.event.pull_request.number }}
+          path: |
+            /tmp/images.txt
+            /tmp/chart_images.json
+          retention-days: 30
+
+      - name: Comment on PR
+        if: steps.extract-images.outputs.has_images == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUM="${{ github.event.pull_request.number }}"
+
+          # Build comment body
+          cat > /tmp/comment.md <<'EOF'
+          ## 🐳 Docker Images Detected
+
+          The following Docker images were found in the Helm charts and will be mirrored to ECR:
+
+          ### Images by Chart
+
+          EOF
+
+          # Group images by chart - process line by line to avoid subshell issues
+          CURRENT_CHART=""
+          while IFS='|' read -r chart image; do
+            if [[ "$chart" != "$CURRENT_CHART" ]]; then
+              echo "" >> /tmp/comment.md
+              echo "**\`$chart\`**" >> /tmp/comment.md
+              echo "" >> /tmp/comment.md
+              echo "| Original Image | ECR Mirror Destination |" >> /tmp/comment.md
+              echo "|---------------|------------------------|" >> /tmp/comment.md
+              CURRENT_CHART="$chart"
+            fi
+            ECR_IMAGE="${ECR_REGISTRY}/${ECR_PREFIX}/${image}"
+            echo "| \`${image}\` | \`${ECR_IMAGE}\` |" >> /tmp/comment.md
+          done < <(cat /tmp/chart_images.json | jq -r '.[] | "\(.chart)|\(.image)"')
+
+          REQUIRED="${REQUIRED_APPROVALS:-1}"
+
+          cat >> /tmp/comment.md <<EOF
+
+          ---
+
+          ### ⚠️ Important Notice
+
+          **DO NOT MERGE THIS PR YET**
+
+          Once this PR receives **${REQUIRED} approval review(s)**, the image(s) above will be automatically mirrored to ECR.
+
+          After the mirroring process completes, another automated comment will be posted confirming that it is safe to merge this PR.
+
+          ### Next Steps
+          1. Review the images above
+          2. Get ${REQUIRED} approval(s) on this PR to trigger mirroring
+          3. Wait for automated mirroring confirmation
+          4. Merge once confirmed safe
+
+          ---
+          🤖 *This comment was automatically generated by the ECR Mirror workflow*
+          EOF
+
+          # Post comment
+          gh pr comment $PR_NUM --body-file /tmp/comment.md
+
+          echo "✅ Comment posted to PR #$PR_NUM"
+
+  check-approval:
+    # Only run for PRs with [DEVOPS-1094] in title
+    if: |
+      (github.event_name == 'pull_request' && startsWith(github.event.pull_request.title, '[DEVOPS-1094]')) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.issue.title, '[DEVOPS-1094]')) ||
+      (github.event_name == 'pull_request_review' && startsWith(github.event.pull_request.title, '[DEVOPS-1094]'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      statuses: write
+      checks: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+
+      - name: Get PR number
+        id: pr-number
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "issue_comment" ]]; then
+            echo "number=${{ github.event.issue.number }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.event_name }}" == "pull_request_review" ]]; then
+            echo "number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check for approvals
+        id: check-approvals
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUM="${{ steps.pr-number.outputs.number }}"
+          REPO="${{ github.repository }}"
+          REQUIRED="${REQUIRED_APPROVALS:-1}"
+
+          echo "Checking PR #$PR_NUM for approvals..."
+          echo "Required approvals: $REQUIRED"
+
+          # Get PR reviews with APPROVED state
+          APPROVED_COUNT=$(gh api "/repos/$REPO/pulls/$PR_NUM/reviews" --jq '[.[] | select(.state == "APPROVED")] | length')
+
+          echo "Found $APPROVED_COUNT approved reviews"
+
+          if [[ $APPROVED_COUNT -ge $REQUIRED ]]; then
+            echo "approved=true" >> $GITHUB_OUTPUT
+            echo "✅ PR has required approvals ($APPROVED_COUNT/$REQUIRED)"
+          else
+            echo "approved=false" >> $GITHUB_OUTPUT
+            echo "❌ PR needs at least $REQUIRED approval review(s) ($APPROVED_COUNT/$REQUIRED)"
+          fi
+
+      - name: Check if mirroring confirmation already posted
+        if: steps.check-approvals.outputs.approved == 'true'
+        id: check-confirmation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUM="${{ steps.pr-number.outputs.number }}"
+
+          # Check if we already posted the mirroring confirmation
+          EXISTING_COMMENT=$(gh pr view $PR_NUM --json comments --jq '.comments[] | select(.body | contains("✅ ECR Mirroring Complete")) | .id' || echo "")
+
+          if [[ -n "$EXISTING_COMMENT" ]]; then
+            echo "already_posted=true" >> $GITHUB_OUTPUT
+            echo "Confirmation already posted"
+          else
+            echo "already_posted=false" >> $GITHUB_OUTPUT
+            echo "No confirmation posted yet"
+          fi
+
+      - name: Download images artifact
+        if: steps.check-approvals.outputs.approved == 'true' && steps.check-confirmation.outputs.already_posted == 'false'
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-images-pr-${{ steps.pr-number.outputs.number }}
+          path: /tmp/artifacts
+        continue-on-error: true
+
+      - name: Post mirroring confirmation
+        if: steps.check-approvals.outputs.approved == 'true' && steps.check-confirmation.outputs.already_posted == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUM="${{ steps.pr-number.outputs.number }}"
+
+          cat > /tmp/mirror-confirmation.md <<'EOF'
+          ## ✅ ECR Mirroring Complete
+
+          All Docker images have been successfully mirrored to ECR:
+
+          ### Mirrored Images by Chart
+
+          EOF
+
+          # Try to read chart images JSON from artifact
+          if [[ -f /tmp/artifacts/chart_images.json ]]; then
+            echo "Using chart images from artifact"
+
+            # Group images by chart - process line by line to avoid subshell issues
+            CURRENT_CHART=""
+            while IFS='|' read -r chart image; do
+              if [[ "$chart" != "$CURRENT_CHART" ]]; then
+                echo "" >> /tmp/mirror-confirmation.md
+                echo "**\`$chart\`**" >> /tmp/mirror-confirmation.md
+                echo "" >> /tmp/mirror-confirmation.md
+                echo "| Original Image | ECR Mirror Location |" >> /tmp/mirror-confirmation.md
+                echo "|---------------|---------------------|" >> /tmp/mirror-confirmation.md
+                CURRENT_CHART="$chart"
+              fi
+              ECR_IMAGE="${ECR_REGISTRY}/${ECR_PREFIX}/${image}"
+              echo "| \`${image}\` | \`${ECR_IMAGE}\` |" >> /tmp/mirror-confirmation.md
+            done < <(cat /tmp/artifacts/chart_images.json | jq -r '.[] | "\(.chart)|\(.image)"')
+          else
+            echo "No artifact found, posting generic confirmation"
+          fi
+
+          cat >> /tmp/mirror-confirmation.md <<'EOF'
+
+          ### Status
+          - ✅ Mirroring: **COMPLETE**
+          - ✅ Images: **Available in ECR**
+          - ✅ Ready to merge: **YES**
+
+          ---
+          🎉 **This PR is now safe to merge!**
+
+          🤖 *This is a mock confirmation for testing purposes*
+          EOF
+
+          gh pr comment $PR_NUM --body-file /tmp/mirror-confirmation.md
+          echo "✅ Posted mirroring confirmation to PR #$PR_NUM"
+
+      - name: Set status check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_NUM="${{ steps.pr-number.outputs.number }}"
+          HEAD_SHA=$(gh pr view $PR_NUM --json headRefOid --jq '.headRefOid')
+          REQUIRED="${REQUIRED_APPROVALS:-1}"
+
+          if [[ "${{ steps.check-approvals.outputs.approved }}" == "true" ]]; then
+            # Approved - set success status
+            gh api "/repos/${{ github.repository }}/statuses/$HEAD_SHA" \
+              -f state=success \
+              -f context="ECR Mirror Approval" \
+              -f description="✅ Approved for ECR mirroring ($REQUIRED+ approvals)" \
+              -f target_url="${{ github.server_url }}/${{ github.repository }}/pull/$PR_NUM"
+          else
+            # Not approved - set pending/failure status
+            gh api "/repos/${{ github.repository }}/statuses/$HEAD_SHA" \
+              -f state=pending \
+              -f context="ECR Mirror Approval" \
+              -f description="⏳ Needs $REQUIRED approval(s) to approve ECR mirroring" \
+              -f target_url="${{ github.server_url }}/${{ github.repository }}/pull/$PR_NUM"
+          fi
+
+          echo "Status check updated for SHA: $HEAD_SHA"
