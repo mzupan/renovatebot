@@ -115,7 +115,8 @@ jobs:
 
               # Store chart path and images in JSON format
               while IFS= read -r image; do
-                if [[ -n "$image" ]]; then
+                # Skip empty, null, or invalid image values
+                if [[ -n "$image" && "$image" != "---" && "$image" != "null" && "$image" != "{}" ]]; then
                   echo "{\"chart\": \"$chart_file\", \"image\": \"$image\"}" >> /tmp/chart_images_raw.txt
                 fi
               done <<< "$IMAGES"
