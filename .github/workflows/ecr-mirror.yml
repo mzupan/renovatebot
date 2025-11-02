@@ -14,6 +14,7 @@ env:
   REQUIRED_APPROVALS: 1  # Number of approvals required to trigger image mirroring
   ECR_REGISTRY: "123456789012.dkr.ecr.us-east-1.amazonaws.com"
   ECR_PREFIX: "mirror"
+  ENABLE_WIZ_SCAN: false  # Set to true to enable Wiz vulnerability scanning
 
 jobs:
   extract-images:
@@ -334,11 +335,26 @@ jobs:
                 echo "" >> /tmp/mirror-confirmation.md
                 echo "**\`$chart\`**" >> /tmp/mirror-confirmation.md
                 echo "" >> /tmp/mirror-confirmation.md
-                echo "| Original Image | ECR Mirror Location |" >> /tmp/mirror-confirmation.md
-                echo "|---------------|---------------------|" >> /tmp/mirror-confirmation.md
+                echo "| Original Image | ECR Mirror Image |" >> /tmp/mirror-confirmation.md
+                echo "|---------------|------------------|" >> /tmp/mirror-confirmation.md
                 CURRENT_CHART="$chart"
               fi
-              ECR_IMAGE="${ECR_REGISTRY}/${ECR_PREFIX}/${image}"
+
+              # Extract tag/digest from original image
+              # Handle both tag (image:tag) and digest (image@sha256:...) formats
+              if [[ "$image" == *"@"* ]]; then
+                # Digest format: registry/repo@sha256:digest
+                DIGEST="${image##*@}"
+                ECR_IMAGE="${ECR_REGISTRY}/${ECR_PREFIX}/${image}@${DIGEST}"
+              elif [[ "$image" == *":"* ]]; then
+                # Tag format: registry/repo:tag
+                TAG="${image##*:}"
+                ECR_IMAGE="${ECR_REGISTRY}/${ECR_PREFIX}/${image}:${TAG}"
+              else
+                # No tag or digest, assume :latest
+                ECR_IMAGE="${ECR_REGISTRY}/${ECR_PREFIX}/${image}:latest"
+              fi
+
               echo "| \`${image}\` | \`${ECR_IMAGE}\` |" >> /tmp/mirror-confirmation.md
             done < <(cat /tmp/artifacts/chart_images.json | jq -r '.[] | "\(.chart)|\(.image)"')
           else
@@ -386,3 +402,261 @@ jobs:
           fi
 
           echo "Status check updated for SHA: $HEAD_SHA"
+
+  wiz-scan:
+    # Only run if Wiz scanning is enabled and for PRs with [DEVOPS-1094] in title
+    if: |
+      github.event_name == 'pull_request' &&
+      startsWith(github.event.pull_request.title, '[DEVOPS-1094]') &&
+      vars.ENABLE_WIZ_SCAN == 'true'
+    needs: extract-images
+    runs-on: [self-hosted]
+    permissions:
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+        with:
+          fetch-depth: 2
+
+      - name: Download images artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-images-pr-${{ github.event.pull_request.number }}
+          path: /tmp/artifacts
+
+      - name: Convert images to Wiz scan format
+        run: |
+          # Convert chart_images.json to the format expected by Wiz scan
+          # Output format: repo,tag1,tag2,tag3
+          if [[ -f /tmp/artifacts/chart_images.json ]]; then
+            # Group by image (without tag/digest) and collect all tags
+            jq -r '.[] | .image' /tmp/artifacts/chart_images.json | while read -r image; do
+              # Extract repo and tag
+              if [[ "$image" == *":"* ]]; then
+                REPO="${image%:*}"
+                TAG="${image##*:}"
+              elif [[ "$image" == *"@"* ]]; then
+                REPO="${image%@*}"
+                TAG="${image##*@}"
+              else
+                REPO="$image"
+                TAG="latest"
+              fi
+              
+              # Add full ECR path
+              echo "${ECR_REGISTRY}/${ECR_PREFIX}/${REPO},${TAG}"
+            done | sort -u > added_repos
+            
+            echo "Images to scan:"
+            cat added_repos
+          else
+            echo "No images artifact found"
+            touch added_repos
+          fi
+
+      - name: Scan Images with Wiz
+        env:
+          WIZ_CLIENT_ID: ${{ secrets.WIZ_CLIENT_ID }}
+          WIZ_CLIENT_SECRET: ${{ secrets.WIZ_CLIENT_SECRET }}
+        run: |
+          # Download the latest version of the wiz-cli
+          curl -o wizcli https://wizcli.app.wiz.io/latest/wizcli && chmod +x wizcli
+          export REGION="us-east-1"
+
+          # Authenticate to Wiz
+          ./wizcli auth --id "$WIZ_CLIENT_ID" --secret "$WIZ_CLIENT_SECRET"
+
+          # Initialize results file
+          touch scan_results.json
+          echo "[]" > scan_results.json
+
+          # Process each line in the format: repo,tag1,tag2,digest3,digest4,...
+          while read LINE ; do
+            # Skip empty lines
+            [ -z "$LINE" ] && continue
+
+            # Split the line by comma
+            IFS=',' read -r REPO TAGS <<< "$LINE"
+
+            # Extract all tags (everything after the first comma)
+            TAGS=${LINE#*,}
+
+            # Process each entry for this repo
+            for TAG in ${TAGS//,/ }; do
+              echo "Processing repository: $REPO with tag: $TAG"
+
+              # Build the full image name
+              if [[ "${TAG}" == "sha256:"* ]]; then
+                # it's really a digest
+                FULL_IMAGE="${REPO}@${TAG}"
+              else
+                # treat as a tag
+                FULL_IMAGE="${REPO}:${TAG}"
+              fi
+              echo "Scanning image: $FULL_IMAGE"
+
+              # Pull the image
+              docker pull $FULL_IMAGE
+
+              if [ $? -ne 0 ]; then
+                echo "Failed to pull image $FULL_IMAGE, skipping scan"
+                continue
+              fi
+
+              clean_image_name=$(echo "$FULL_IMAGE" | sed 's/[\/:]/_/g' | sed 's/[^a-zA-Z0-9_.-]/_/g')
+
+              # Scan the image and save results
+              echo "Running Wiz scan on $FULL_IMAGE"
+              ./wizcli docker scan --policy "test-tpay-vulnerability-scans" --image $FULL_IMAGE --format json --no-publish > scan_results_$clean_image_name.json
+
+            done
+          done < added_repos
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@6b9c6063abd6010835644d4c2e1bef4cf5cd0fca # v6.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: '3.13'
+
+      - name: Process scan results
+        id: process_results
+        working-directory: .github/workflows/
+        run: |
+          uv run --script parse-wizchanges.py -d ../.. -o ../../
+          touch ../../all_criticals.csv
+          if [[ -f ../../critical_found ]]; then
+              echo "critical_found=true" >> $GITHUB_OUTPUT
+          else
+              echo "critical_found=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Critical Vulnerabilities Summary Comment
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+
+            try {
+              // Check if the all_criticals.csv file exists
+              if (!fs.existsSync('./all_criticals.csv')) {
+                console.log('No all_criticals.csv file found, skipping summary creation');
+                return;
+              }
+
+              // Find existing summary comment first
+              const { data: comments } = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number
+              });
+
+              const existingSummaryComment = comments.find(comment => {
+                return comment.body.includes('## Critical Vulnerabilities Summary') &&
+                       comment.user.login === 'github-actions[bot]';
+              });
+
+              // Read and process critical vulnerabilities
+              const criticalData = fs.readFileSync('./all_criticals.csv', 'utf8');
+              const lines = criticalData.trim().split('\n');
+
+              // Group vulnerabilities by image
+              const imageVulnerabilities = {};
+
+              lines.forEach(line => {
+                const parts = line.split(',');
+                if (parts.length >= 3) {
+                  const imageName = parts[0].trim();
+                  const cveName = parts[1].trim();
+                  const severity = parts[2].trim();
+
+                  if (!imageVulnerabilities[imageName]) {
+                    imageVulnerabilities[imageName] = [];
+                  }
+
+                  imageVulnerabilities[imageName].push({
+                    cve: cveName,
+                    severity: severity
+                  });
+                }
+              });
+
+              // Create the summary comment
+              let commentBody = '## Critical Vulnerabilities Summary\n\n';
+              commentBody += 'The following critical vulnerabilities were found in images to be mirrored:\n\n';
+
+              Object.keys(imageVulnerabilities).forEach(image => {
+                commentBody += `### ${image}\n\n`;
+                commentBody += '| CVE Name | Severity |\n';
+                commentBody += '|----------|----------|\n';
+
+                imageVulnerabilities[image].forEach(vuln => {
+                  commentBody += `| ${vuln.cve} | ${vuln.severity} |\n`;
+                });
+
+                commentBody += '\n';
+              });
+
+              if (existingSummaryComment) {
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: existingSummaryComment.id,
+                  body: commentBody
+                });
+                console.log('Updated existing critical vulnerabilities summary comment');
+              } else {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  body: commentBody
+                });
+                console.log('Created new critical vulnerabilities summary comment');
+              }
+            } catch (error) {
+              console.error('Error creating critical vulnerabilities summary:', error);
+            }
+
+      - name: Manage PR labels based on scan results
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            try {
+              const { data: currentLabels } = await github.rest.issues.listLabelsOnIssue({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number
+              });
+
+              const hasCriticalLabel = currentLabels.some(label => label.name === 'critical');
+              const criticalFound = '${{ steps.process_results.outputs.critical_found }}' === 'true';
+
+              console.log(`Has critical label: ${hasCriticalLabel}, Critical found: ${criticalFound}`);
+
+              if (criticalFound && !hasCriticalLabel) {
+                console.log('Adding "critical" label to PR');
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  labels: ['critical']
+                });
+              } else if (!criticalFound && hasCriticalLabel) {
+                console.log('Removing "critical" label from PR');
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  name: 'critical'
+                });
+              }
+            } catch (error) {
+              console.error('Failed to manage PR labels:', error);
+            }
