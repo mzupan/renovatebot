@@ -13,6 +13,22 @@ on:
         options:
           - "true"
           - "false"
+      rebase_all:
+        description: "Force rebase all PRs"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      recreate_closed:
+        description: "Recreate closed PRs"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "true"
+          - "false"
 
 permissions:
   id-token: write
@@ -33,3 +49,5 @@ jobs:
         env:
           RENOVATE_DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || github.event.inputs.dry_run }}
           RENOVATE_REPOSITORIES: ${{ github.repository }}
+          RENOVATE_RECREATE_CLOSED: ${{ github.event.inputs.recreate_closed || 'false' }}
+          RENOVATE_REBASE_STALE_PRS: ${{ github.event.inputs.rebase_all || 'false' }}
