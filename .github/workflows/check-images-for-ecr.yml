@@ -71,6 +71,9 @@ jobs:
             echo "Processing: $chart_file"
             CHART_DIR=$(dirname "$chart_file")
 
+            # Extract chart name from directory (e.g., prometheus-operator from envs/prod/prometheus-operator)
+            CHART_NAME=$(basename "$CHART_DIR")
+
             cd "$CHART_DIR"
 
             # Update dependencies
@@ -81,17 +84,29 @@ jobs:
               echo "⚠️ Dependency update failed, continuing anyway..."
             fi
 
+            # Check if base values file exists
+            BASE_VALUES_FILE="${GITHUB_WORKSPACE}/envs/base/${CHART_NAME}.yaml"
+            HELM_TEMPLATE_ARGS=""
+
+            if [[ -f "$BASE_VALUES_FILE" ]]; then
+              echo "📝 Found base values file: envs/base/${CHART_NAME}.yaml"
+              HELM_TEMPLATE_ARGS="-f ${BASE_VALUES_FILE}"
+            else
+              echo "ℹ️  No base values file found at envs/base/${CHART_NAME}.yaml, using defaults"
+            fi
+
             # Template the chart and extract images
             echo "Running helm template to extract images..."
+            echo "Command: helm template . ${HELM_TEMPLATE_ARGS}"
 
             # Use yq to properly parse YAML and extract image fields
             # This handles both quoted and unquoted images
-            IMAGES=$(helm template . 2>/dev/null | yq eval '.. | select(has("image")) | .image' - 2>/dev/null | grep -v '^null$' | sort -u || true)
+            IMAGES=$(helm template . ${HELM_TEMPLATE_ARGS} 2>/dev/null | yq eval '.. | select(has("image")) | .image' - 2>/dev/null | grep -v '^null$' | sort -u || true)
 
             # Fallback to grep if yq doesn't find anything
             if [[ -z "$IMAGES" ]]; then
               echo "Trying fallback grep method..."
-              IMAGES=$(helm template . 2>/dev/null | grep -E '^\s*-?\s*image:\s*' | sed -E 's/.*image:\s*"?([^"]+)"?.*/\1/' | sort -u || true)
+              IMAGES=$(helm template . ${HELM_TEMPLATE_ARGS} 2>/dev/null | grep -E '^\s*-?\s*image:\s*' | sed -E 's/.*image:\s*"?([^"]+)"?.*/\1/' | sort -u || true)
             fi
 
             if [[ -n "$IMAGES" ]]; then
