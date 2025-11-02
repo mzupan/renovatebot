@@ -102,13 +102,23 @@ jobs:
 
             if [[ -f "$BASE_VALUES_FILE" ]]; then
               echo "📝 Found base values file: envs/base/${CHART_NAME}.yaml"
-              HELM_TEMPLATE_ARGS="-f ${BASE_VALUES_FILE}"
+
+              # Create a temporary values file with ECR registry references removed
+              # This ensures we get upstream images, not our ECR mirrors
+              TEMP_VALUES_FILE="/tmp/${CHART_NAME}_values_cleaned.yaml"
+
+              echo "🧹 Cleaning ECR registry references from values file..."
+              # Remove lines containing ECR registry URLs
+              grep -v "dkr.ecr.us-east-1.amazonaws.com" "$BASE_VALUES_FILE" > "$TEMP_VALUES_FILE"
+
+              echo "Using cleaned values file for templating (removes ECR mirrors)"
+              HELM_TEMPLATE_ARGS="-f ${TEMP_VALUES_FILE}"
             else
               echo "ℹ️  No base values file found at envs/base/${CHART_NAME}.yaml, using defaults"
             fi
 
             # Template the chart and extract images
-            echo "Running helm template to extract images..."
+            echo "Running helm template to extract upstream images..."
             echo "Command: helm template . ${HELM_TEMPLATE_ARGS}"
 
             # Use yq to properly parse YAML and extract image fields
