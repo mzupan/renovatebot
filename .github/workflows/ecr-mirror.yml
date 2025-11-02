@@ -651,21 +651,20 @@ jobs:
             done
           done < added_repos
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@6b9c6063abd6010835644d4c2e1bef4cf5cd0fca # v6.0.1
-
-      - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
-        with:
-          python-version: '3.13'
-
       - name: Process scan results
         id: process_results
-        working-directory: .github/workflows/
         run: |
-          uv run --script parse-wizchanges.py -d ../.. -o ../../
-          touch ../../all_criticals.csv
-          if [[ -f ../../critical_found ]]; then
+          # Make script executable
+          chmod +x .github/workflows/parse-wizchanges.sh
+
+          # Run the parsing script
+          .github/workflows/parse-wizchanges.sh -d . -o .
+
+          # Ensure all_criticals.csv exists (script creates it but ensure for downstream steps)
+          touch all_criticals.csv
+
+          # Check if critical vulnerabilities were found
+          if [[ -f critical_found ]]; then
               echo "critical_found=true" >> $GITHUB_OUTPUT
           else
               echo "critical_found=false" >> $GITHUB_OUTPUT
