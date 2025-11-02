@@ -2,9 +2,9 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "commitMessagePrefix": "[DEVOPS-1094]",
   "extends": [
-    "config:recommended",
-    ":dependencyDashboard"
+    "config:recommended"
   ],
+  "dependencyDashboard": false,
   "labels": [
     "dependencies"
   ],
@@ -12,6 +12,10 @@
     "addLabels": ["security"]
   },
   "prHourlyLimit": 10,
+  "prConcurrentLimit": 5,
+  "helmv3": {
+    "fileMatch": ["(^|/)Chart\\.yaml$"]
+  },
   "packageRules": [
     {
       "matchDepTypes": [
@@ -32,6 +36,12 @@
       ],
       "labels": ["production"],
       "additionalBranchPrefix": "prod-{{parentDir}}-"
+    },
+    {
+      "matchManagers": ["helmv3"],
+      "groupName": null,
+      "separateMajorMinor": true,
+      "separateMinorPatch": false
     }
   ]
 }
