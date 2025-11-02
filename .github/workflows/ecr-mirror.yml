@@ -335,25 +335,13 @@ jobs:
                 echo "" >> /tmp/mirror-confirmation.md
                 echo "**\`$chart\`**" >> /tmp/mirror-confirmation.md
                 echo "" >> /tmp/mirror-confirmation.md
-                echo "| Original Image | ECR Mirror Image |" >> /tmp/mirror-confirmation.md
-                echo "|---------------|------------------|" >> /tmp/mirror-confirmation.md
+                echo "| Original Image | ECR Mirror Location |" >> /tmp/mirror-confirmation.md
+                echo "|---------------|---------------------|" >> /tmp/mirror-confirmation.md
                 CURRENT_CHART="$chart"
               fi
 
-              # Extract tag/digest from original image
-              # Handle both tag (image:tag) and digest (image@sha256:...) formats
-              if [[ "$image" == *"@"* ]]; then
-                # Digest format: registry/repo@sha256:digest
-                DIGEST="${image##*@}"
-                ECR_IMAGE="${ECR_REGISTRY}/${ECR_PREFIX}/${image}@${DIGEST}"
-              elif [[ "$image" == *":"* ]]; then
-                # Tag format: registry/repo:tag
-                TAG="${image##*:}"
-                ECR_IMAGE="${ECR_REGISTRY}/${ECR_PREFIX}/${image}:${TAG}"
-              else
-                # No tag or digest, assume :latest
-                ECR_IMAGE="${ECR_REGISTRY}/${ECR_PREFIX}/${image}:latest"
-              fi
+              # Build ECR mirror path - keep the original image format (tag or digest)
+              ECR_IMAGE="${ECR_REGISTRY}/${ECR_PREFIX}/${image}"
 
               echo "| \`${image}\` | \`${ECR_IMAGE}\` |" >> /tmp/mirror-confirmation.md
             done < <(cat /tmp/artifacts/chart_images.json | jq -r '.[] | "\(.chart)|\(.image)"')
