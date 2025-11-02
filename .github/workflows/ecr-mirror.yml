@@ -103,52 +103,20 @@ jobs:
             if [[ -f "$BASE_VALUES_FILE" ]]; then
               echo "📝 Found base values file: envs/base/${CHART_NAME}.yaml"
 
-              # Temporarily modify the checked-out file to remove ECR registry references
+              # Temporarily modify the checked-out file to remove ECR registry/repository references
               # This ensures we get upstream images, not our ECR mirrors
-              echo "🧹 Removing image blocks with ECR registry or mirror/ references..."
+              echo "🧹 Removing registry/repository values with ECR or mirror/ references..."
 
-              # Use awk to remove entire image: blocks that contain ECR or mirror/ references
-              awk '
-              /^[[:space:]]*image:/ {
-                # Start of image block - capture it
-                indent = match($0, /[^[:space:]]/)
-                block = $0 "\n"
-                has_ecr_or_mirror = 0
-
-                # Read subsequent lines that belong to this block (more indented)
-                while (getline > 0) {
-                  current_indent = match($0, /[^[:space:]]/)
-
-                  # If less or equal indentation, we have exited the block
-                  if (current_indent > 0 && current_indent <= indent) {
-                    # Print block only if it does not contain ECR or mirror
-                    if (!has_ecr_or_mirror) {
-                      printf "%s", block
-                    }
-                    print $0
-                    break
-                  }
-
-                  # Check if this line contains ECR or mirror/
-                  if ($0 ~ /dkr\.ecr\.us-east-1\.amazonaws\.com/ || $0 ~ /mirror\//) {
-                    has_ecr_or_mirror = 1
-                  }
-
-                  block = block $0 "\n"
-                }
-
-                # Handle end of file
-                if (current_indent == 0 && !has_ecr_or_mirror) {
-                  printf "%s", block
-                }
-                next
-              }
-              { print }
+              # Use yq to delete registry and repository keys that contain ECR or mirror values
+              # This preserves the YAML structure while removing just the ECR overrides
+              yq eval '
+                (.. | select(has("registry")) | select(.registry | test("dkr\\.ecr\\.us-east-1\\.amazonaws\\.com"))) |= del(.registry) |
+                (.. | select(has("repository")) | select(.repository | test("mirror/"))) |= del(.repository)
               ' "$BASE_VALUES_FILE" > "${BASE_VALUES_FILE}.tmp"
 
               mv "${BASE_VALUES_FILE}.tmp" "$BASE_VALUES_FILE"
 
-              echo "Using modified base values file for templating (ECR image blocks removed)"
+              echo "Using modified base values file for templating (ECR registry/repository keys removed)"
               HELM_TEMPLATE_ARGS="-f ${BASE_VALUES_FILE}"
             else
               echo "ℹ️  No base values file found at envs/base/${CHART_NAME}.yaml, using defaults"
@@ -158,44 +126,17 @@ jobs:
             LOCAL_VALUES_FILE="${CHART_DIR}/values.yaml"
             if [[ -f "$LOCAL_VALUES_FILE" ]]; then
               echo "📝 Found local values file: ${CHART_DIR}/values.yaml"
-              echo "🧹 Removing image blocks with ECR registry or mirror/ references..."
+              echo "🧹 Removing registry/repository values with ECR or mirror/ references..."
 
-              # Same awk script for local values
-              awk '
-              /^[[:space:]]*image:/ {
-                indent = match($0, /[^[:space:]]/)
-                block = $0 "\n"
-                has_ecr_or_mirror = 0
-
-                while (getline > 0) {
-                  current_indent = match($0, /[^[:space:]]/)
-
-                  if (current_indent > 0 && current_indent <= indent) {
-                    if (!has_ecr_or_mirror) {
-                      printf "%s", block
-                    }
-                    print $0
-                    break
-                  }
-
-                  if ($0 ~ /dkr\.ecr\.us-east-1\.amazonaws\.com/ || $0 ~ /mirror\//) {
-                    has_ecr_or_mirror = 1
-                  }
-
-                  block = block $0 "\n"
-                }
-
-                if (current_indent == 0 && !has_ecr_or_mirror) {
-                  printf "%s", block
-                }
-                next
-              }
-              { print }
+              # Same yq processing for local values
+              yq eval '
+                (.. | select(has("registry")) | select(.registry | test("dkr\\.ecr\\.us-east-1\\.amazonaws\\.com"))) |= del(.registry) |
+                (.. | select(has("repository")) | select(.repository | test("mirror/"))) |= del(.repository)
               ' "$LOCAL_VALUES_FILE" > "${LOCAL_VALUES_FILE}.tmp"
 
               mv "${LOCAL_VALUES_FILE}.tmp" "$LOCAL_VALUES_FILE"
 
-              echo "Modified local values file for templating (ECR image blocks removed)"
+              echo "Modified local values file for templating (ECR registry/repository keys removed)"
             else
               echo "ℹ️  No local values.yaml found in ${CHART_DIR}"
             fi
