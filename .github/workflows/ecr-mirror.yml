@@ -11,23 +11,22 @@ on:
     types: [submitted]
 
 env:
-  # Feature Flags
-  FEATURE_ENABLE_WORKFLOWS: true  # Set to false to completely disable this workflow
-  FEATURE_ENABLE_MIRROR: false  # Set to true to actually mirror images (false = test mode only)
-
   # Configuration
   REQUIRED_APPROVALS: 1  # Number of approvals required to trigger image mirroring
   ECR_REGISTRY: "123456789012.dkr.ecr.us-east-1.amazonaws.com"
   ECR_PREFIX: "mirror"
   ENABLE_WIZ_SCAN: false  # Set to true to enable Wiz vulnerability scanning
   AWS_REGION: "us-east-1"  # AWS region for ECR
-  # AWS_ROLE_ARN should be set in repository variables or secrets
+  # Feature flags should be set as repository variables:
+  # - FEATURE_ENABLE_WORKFLOWS: Set to 'true' to enable this workflow (default: false)
+  # - FEATURE_ENABLE_MIRROR: Set to 'true' to actually mirror images (default: false = dry run mode)
+  # - AWS_ROLE_ARN: IAM role ARN for OIDC authentication
 
 jobs:
   extract-images:
     # Only run for PRs with [DEVOPS-1094] in title on PR open/sync
     if: |
-      env.FEATURE_ENABLE_WORKFLOWS == 'true' &&
+      vars.FEATURE_ENABLE_WORKFLOWS == 'true' &&
       github.event_name == 'pull_request' &&
       startsWith(github.event.pull_request.title, '[DEVOPS-1094]')
     runs-on: ubuntu-latest
@@ -220,7 +219,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           PR_NUM="${{ github.event.pull_request.number }}"
-          ENABLE_MIRROR="${FEATURE_ENABLE_MIRROR:-false}"
+          ENABLE_MIRROR="${{ vars.FEATURE_ENABLE_MIRROR || 'false' }}"
 
           # Build comment body
           if [[ "$ENABLE_MIRROR" == "false" ]]; then
@@ -316,7 +315,7 @@ jobs:
   check-approval:
     # Only run for PRs with [DEVOPS-1094] in title
     if: |
-      env.FEATURE_ENABLE_WORKFLOWS == 'true' &&
+      vars.FEATURE_ENABLE_WORKFLOWS == 'true' &&
       ((github.event_name == 'pull_request' && startsWith(github.event.pull_request.title, '[DEVOPS-1094]')) ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.issue.title, '[DEVOPS-1094]')) ||
       (github.event_name == 'pull_request_review' && startsWith(github.event.pull_request.title, '[DEVOPS-1094]')))
@@ -415,7 +414,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           PR_NUM="${{ steps.pr-number.outputs.number }}"
-          ENABLE_MIRROR="${FEATURE_ENABLE_MIRROR:-false}"
+          ENABLE_MIRROR="${{ vars.FEATURE_ENABLE_MIRROR || 'false' }}"
 
           if [[ "$ENABLE_MIRROR" == "false" ]]; then
             cat > /tmp/mirror-confirmation.md <<'EOF'
@@ -527,7 +526,7 @@ jobs:
   wiz-scan:
     # Only run if Wiz scanning is enabled and for PRs with [DEVOPS-1094] in title
     if: |
-      env.FEATURE_ENABLE_WORKFLOWS == 'true' &&
+      vars.FEATURE_ENABLE_WORKFLOWS == 'true' &&
       github.event_name == 'pull_request' &&
       startsWith(github.event.pull_request.title, '[DEVOPS-1094]') &&
       vars.ENABLE_WIZ_SCAN == 'true'
