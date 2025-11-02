@@ -1,0 +1,25 @@
+kube-prometheus-stack:
+  alertmanager:
+    ingress:
+      ingressClassName: nginx-int
+      hosts:
+        - alertmanager.domain.com
+
+  prometheus:
+    ingress:
+      ingressClassName: nginx-int
+      hosts:
+        - prometheus.pdomain.com
+    prometheusSpec:
+      resources:
+        requests:
+          cpu: 2
+          memory: 18Gi
+        limits:
+          memory: 18Gi
+    
+
+  defaultRules:
+    node:
+      # TODO: remove mountpoint filter when k8s upgraded to 1.33
+      fsSelector: 'fstype!="", fstype!="erofs", mountpoint!~"/local/(mnt|opt|var)"'

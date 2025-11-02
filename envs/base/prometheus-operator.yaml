@@ -1,0 +1,187 @@
+---
+kube-prometheus-stack:
+  fullnameOverride: kube-prometheus
+
+  #
+  # never load grafana. We use a central grafana instance
+  grafana:
+    enabled: false
+
+  alertmanager:
+    alertmanagerSpec:
+      image:
+        registry: 1111111.dkr.ecr.us-east-1.amazonaws.com
+        repository: mirror/quay.io/prometheus/alertmanager
+      replicas: 1
+      podMetadata:
+        annotations:
+          configmap.reloader.stakater.com/reload: "alertmanager-template"
+      storage:
+        volumeClaimTemplate:
+          spec:
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 5Gi
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: alertmanager
+    ingress:
+      enabled: true
+      ingressClassName: nginx-private
+      annotations:
+        nginx.ingress.kubernetes.io/use-forwarded-headers: "true"
+      hosts:
+        - alertmanager.change.me
+      paths:
+        - /
+  kube-state-metrics:
+    image:
+      registry: 11111111.dkr.ecr.us-east-1.amazonaws.com
+      repository: mirror/registry.k8s.io/kube-state-metrics/kube-state-metrics
+
+    resources:
+      requests:
+        cpu: 500m
+        memory: 512Mi
+      limits:
+        memory: 512Mi
+    extraArgs:
+      - --metric-annotations-allowlist=secrets=[reconcile.external-secrets.io/data-hash]
+      - --metric-labels-allowlist=secrets=[reconcile.external-secrets.io/created-by]
+
+  prometheusOperator:
+    image:
+      registry: 1111111.dkr.ecr.us-east-1.amazonaws.com
+      repository: mirror/quay.io/prometheus-operator/prometheus-operator
+    prometheusConfigReloader:
+      image:
+        registry: "1111111.dkr.ecr.us-east-1.amazonaws.com/mirror/quay.io"
+    admissionWebhooks:
+      patch:
+        image:
+          registry: 1111111.dkr.ecr.us-east-1.amazonaws.com
+          repository: mirror/registry.k8s.io/ingress-nginx/kube-webhook-certgen
+
+  prometheus:
+    ingress:
+      enabled: true
+      ingressClassName: nginx-private
+      annotations:
+        nginx.ingress.kubernetes.io/use-forwarded-headers: "true"
+      hosts:
+        - prom-operator.change.me
+      paths:
+        - /
+    prometheusSpec:
+      image:
+        registry: 1111111.dkr.ecr.us-east-1.amazonaws.com
+        repository: mirror/quay.io/prometheus/prometheus
+
+      retention: 30m
+      retentionSize: 800MB
+
+      additionalArgs:
+        - name: storage.tsdb.min-block-duration
+          value: 10m
+        - name: storage.tsdb.max-block-duration
+          value: 15m
+
+      #
+      # probably want to change these defaults
+      resources:
+        requests:
+          cpu: 1
+          memory: 6Gi
+        limits:
+          memory: 6Gi
+
+      remoteWrite:
+        - url: https://mimir.logging.domain.com./api/v1/push
+          # basicAuth:
+          #   username:
+          #     name: "prometheus-remote-write-auth"
+          #     key: "username"
+          #   password:
+          #     name: "prometheus-remote-write-auth" 
+          #     key: "password"
+      ruleSelector: {}
+      ruleSelectorNilUsesHelmValues: false
+      retention: 1h
+      walCompression: false
+      serviceMonitorSelector: {}
+      serviceMonitorSelectorNilUsesHelmValues: false
+      podMonitorSelector: {}
+      podMonitorSelectorNilUsesHelmValues: false
+      scrapeConfigSelectorNilUsesHelmValues: false
+      ruleNamespaceSelector: {}
+      probeSelectorNilUsesHelmValues: false
+
+  defaultRules:
+    rules:
+      kubeScheduler: false
+      kubernetesApps: false
+      kubernetesAbsent: false
+      kubernetesSystem: false
+      kubernetesResources: false
+      time: false
+      node: false
+      general: false
+    additionalRuleLabels:
+      role: prom-operator-rules
+      team: devops
+    node:
+      fsSelector: 'fstype!="", fstype!="erofs"'
+
+
+  kubeScheduler:
+    enabled: false
+
+  kubeControllerManager:
+    enabled: false
+
+  kubelet:
+    enabled: true
+
+  kubeApiServer:
+    enabled: false
+
+  kubeEtcd:
+    enabled: false
+
+  kubeProxy:
+    enabled: false
+
+  nodeExporter:
+    enabled: true
+
+  prometheus-node-exporter:
+    image:
+      registry: 111111.dkr.ecr.us-east-1.amazonaws.com
+      repository: mirror/quay.io/prometheus/node-exporter
+      
+    extraArgs:
+      # Enable collectors off by default
+      - --collector.ethtool
+      # Disable unused collectors
+      - --no-collector.arp
+      - --no-collector.ipvs
+      - --no-collector.sockstat
+      - --no-collector.softnet
+      # Excludes from kube-prometheus-stack
+      - --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|var/lib/docker/.+|var/lib/kubelet/.+)($|/)
+      - --collector.filesystem.fs-types-exclude=^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs|erofs)$
+
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: eks.amazonaws.com/compute-type
+              operator: NotIn
+              values:
+              - fargate
