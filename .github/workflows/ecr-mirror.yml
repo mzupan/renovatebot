@@ -105,17 +105,50 @@ jobs:
 
               # Temporarily modify the checked-out file to remove ECR registry references
               # This ensures we get upstream images, not our ECR mirrors
-              echo "🧹 Removing ECR registry and mirror path references from base values file..."
+              echo "🧹 Removing image blocks with ECR registry or mirror/ references..."
 
-              # Debug: Show lines that will be removed
-              echo "Lines to be removed (matching ECR or mirror/):"
-              grep -E '(dkr\.ecr\.us-east-1\.amazonaws\.com|mirror/)' "$BASE_VALUES_FILE" || echo "No matching lines found"
+              # Use awk to remove entire image: blocks that contain ECR or mirror/ references
+              awk '
+              /^[[:space:]]*image:/ {
+                # Start of image block - capture it
+                indent = match($0, /[^[:space:]]/)
+                block = $0 "\n"
+                has_ecr_or_mirror = 0
 
-              # Remove lines containing ECR registry URLs or mirror paths (in-place)
-              sed -i.bak -e '/dkr\.ecr\.us-east-1\.amazonaws\.com/d' -e '/mirror\//d' "$BASE_VALUES_FILE"
+                # Read subsequent lines that belong to this block (more indented)
+                while (getline > 0) {
+                  current_indent = match($0, /[^[:space:]]/)
 
-              echo "Using modified base values file for templating (ECR mirrors removed)"
-              echo "Modified file line count: $(wc -l < "$BASE_VALUES_FILE") (was $(wc -l < "$BASE_VALUES_FILE.bak"))"
+                  # If less or equal indentation, we have exited the block
+                  if (current_indent > 0 && current_indent <= indent) {
+                    # Print block only if it does not contain ECR or mirror
+                    if (!has_ecr_or_mirror) {
+                      printf "%s", block
+                    }
+                    print $0
+                    break
+                  }
+
+                  # Check if this line contains ECR or mirror/
+                  if ($0 ~ /dkr\.ecr\.us-east-1\.amazonaws\.com/ || $0 ~ /mirror\//) {
+                    has_ecr_or_mirror = 1
+                  }
+
+                  block = block $0 "\n"
+                }
+
+                # Handle end of file
+                if (current_indent == 0 && !has_ecr_or_mirror) {
+                  printf "%s", block
+                }
+                next
+              }
+              { print }
+              ' "$BASE_VALUES_FILE" > "${BASE_VALUES_FILE}.tmp"
+
+              mv "${BASE_VALUES_FILE}.tmp" "$BASE_VALUES_FILE"
+
+              echo "Using modified base values file for templating (ECR image blocks removed)"
               HELM_TEMPLATE_ARGS="-f ${BASE_VALUES_FILE}"
             else
               echo "ℹ️  No base values file found at envs/base/${CHART_NAME}.yaml, using defaults"
@@ -125,19 +158,51 @@ jobs:
             LOCAL_VALUES_FILE="${CHART_DIR}/values.yaml"
             if [[ -f "$LOCAL_VALUES_FILE" ]]; then
               echo "📝 Found local values file: ${CHART_DIR}/values.yaml"
-              echo "🧹 Removing ECR registry and mirror path references from local values file..."
+              echo "🧹 Removing image blocks with ECR registry or mirror/ references..."
 
-              # Remove lines containing ECR registry URLs or mirror paths (in-place)
-              sed -i.bak -e '/dkr\.ecr\.us-east-1\.amazonaws\.com/d' -e '/mirror\//d' "$LOCAL_VALUES_FILE"
+              # Same awk script for local values
+              awk '
+              /^[[:space:]]*image:/ {
+                indent = match($0, /[^[:space:]]/)
+                block = $0 "\n"
+                has_ecr_or_mirror = 0
 
-              echo "Modified local values file for templating (ECR mirrors removed)"
+                while (getline > 0) {
+                  current_indent = match($0, /[^[:space:]]/)
+
+                  if (current_indent > 0 && current_indent <= indent) {
+                    if (!has_ecr_or_mirror) {
+                      printf "%s", block
+                    }
+                    print $0
+                    break
+                  }
+
+                  if ($0 ~ /dkr\.ecr\.us-east-1\.amazonaws\.com/ || $0 ~ /mirror\//) {
+                    has_ecr_or_mirror = 1
+                  }
+
+                  block = block $0 "\n"
+                }
+
+                if (current_indent == 0 && !has_ecr_or_mirror) {
+                  printf "%s", block
+                }
+                next
+              }
+              { print }
+              ' "$LOCAL_VALUES_FILE" > "${LOCAL_VALUES_FILE}.tmp"
+
+              mv "${LOCAL_VALUES_FILE}.tmp" "$LOCAL_VALUES_FILE"
+
+              echo "Modified local values file for templating (ECR image blocks removed)"
             else
               echo "ℹ️  No local values.yaml found in ${CHART_DIR}"
             fi
 
             # Template the chart and extract images
             echo "Running helm template to extract upstream images..."
-            echo "Command: helm template . ${HELM_TEMPLATE_ARGS}"
+            echo "Command: helm template ."
 
             # Debug: Show what helm template outputs
             echo "=== Helm Template Output (first 100 lines) ==="
