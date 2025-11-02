@@ -103,18 +103,31 @@ jobs:
             if [[ -f "$BASE_VALUES_FILE" ]]; then
               echo "📝 Found base values file: envs/base/${CHART_NAME}.yaml"
 
-              # Create a temporary values file with ECR registry references removed
+              # Temporarily modify the checked-out file to remove ECR registry references
               # This ensures we get upstream images, not our ECR mirrors
-              TEMP_VALUES_FILE="/tmp/${CHART_NAME}_values_cleaned.yaml"
+              echo "🧹 Removing ECR registry and mirror path references from base values file..."
 
-              echo "🧹 Cleaning ECR registry references from values file..."
-              # Remove lines containing ECR registry URLs
-              grep -v "dkr.ecr.us-east-1.amazonaws.com" "$BASE_VALUES_FILE" > "$TEMP_VALUES_FILE"
+              # Remove lines containing ECR registry URLs or mirror paths (in-place)
+              sed -i.bak -e '/dkr\.ecr\.us-east-1\.amazonaws\.com/d' -e '/mirror\//d' "$BASE_VALUES_FILE"
 
-              echo "Using cleaned values file for templating (removes ECR mirrors)"
-              HELM_TEMPLATE_ARGS="-f ${TEMP_VALUES_FILE}"
+              echo "Using modified base values file for templating (ECR mirrors removed)"
+              HELM_TEMPLATE_ARGS="-f ${BASE_VALUES_FILE}"
             else
               echo "ℹ️  No base values file found at envs/base/${CHART_NAME}.yaml, using defaults"
+            fi
+
+            # Also check and modify local values.yaml in chart directory
+            LOCAL_VALUES_FILE="${CHART_DIR}/values.yaml"
+            if [[ -f "$LOCAL_VALUES_FILE" ]]; then
+              echo "📝 Found local values file: ${CHART_DIR}/values.yaml"
+              echo "🧹 Removing ECR registry and mirror path references from local values file..."
+
+              # Remove lines containing ECR registry URLs or mirror paths (in-place)
+              sed -i.bak -e '/dkr\.ecr\.us-east-1\.amazonaws\.com/d' -e '/mirror\//d' "$LOCAL_VALUES_FILE"
+
+              echo "Modified local values file for templating (ECR mirrors removed)"
+            else
+              echo "ℹ️  No local values.yaml found in ${CHART_DIR}"
             fi
 
             # Template the chart and extract images
