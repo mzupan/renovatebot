@@ -1,0 +1,15 @@
+# CODEOWNERS - Define who can run protected workflows
+#
+# Format: <pattern> @username1 @username2 @org/team
+#
+# For workflow authorization, any line with @ symbols will be parsed
+# to extract authorized GitHub usernames.
+#
+# Example:
+# * @mzupan @anotheruser
+# /infrastructure/ @devops-team
+#
+# Documentation: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything in the repo
+* @mzupan

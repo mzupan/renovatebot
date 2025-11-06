@@ -1,0 +1,96 @@
+name: CODEOWNERS Validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      action_name:
+        description: "Name of the action to run"
+        required: false
+        default: "manual-action"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate-codeowner:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
+
+      - name: Check if user is in CODEOWNERS
+        id: check-codeowner
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          echo "Checking if user '$ACTOR' is in CODEOWNERS..."
+
+          # Check if CODEOWNERS file exists
+          CODEOWNERS_FILE=""
+          if [[ -f "CODEOWNERS" ]]; then
+            CODEOWNERS_FILE="CODEOWNERS"
+          elif [[ -f ".github/CODEOWNERS" ]]; then
+            CODEOWNERS_FILE=".github/CODEOWNERS"
+          elif [[ -f "docs/CODEOWNERS" ]]; then
+            CODEOWNERS_FILE="docs/CODEOWNERS"
+          fi
+
+          if [[ -z "$CODEOWNERS_FILE" ]]; then
+            echo "❌ ERROR: No CODEOWNERS file found in repository"
+            echo "Expected locations: CODEOWNERS, .github/CODEOWNERS, or docs/CODEOWNERS"
+            exit 1
+          fi
+
+          echo "Found CODEOWNERS file at: $CODEOWNERS_FILE"
+
+          # Extract all usernames from CODEOWNERS
+          # CODEOWNERS format: pattern @username or pattern @org/team
+          # This captures all @mentions including multiple per line
+          CODEOWNERS=$(grep -oE '@[a-zA-Z0-9_-]+' "$CODEOWNERS_FILE" | sed 's/@//' | sort -u)
+
+          if [[ -z "$CODEOWNERS" ]]; then
+            echo "❌ ERROR: No code owners found in $CODEOWNERS_FILE"
+            echo "File contents:"
+            cat "$CODEOWNERS_FILE"
+            exit 1
+          fi
+
+          echo "Code owners found:"
+          echo "$CODEOWNERS"
+
+          # Check if current user is in the list
+          if echo "$CODEOWNERS" | grep -qx "$ACTOR"; then
+            echo "✅ User '$ACTOR' is authorized (found in CODEOWNERS)"
+            echo "authorized=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ User '$ACTOR' is NOT in CODEOWNERS"
+            echo "authorized=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Fail if not authorized
+        if: steps.check-codeowner.outputs.authorized != 'true'
+        run: |
+          echo "❌ ERROR: You are not authorized to run this action"
+          echo ""
+          echo "User: ${{ github.actor }}"
+          echo "Only users listed in the CODEOWNERS file can run this workflow."
+          echo ""
+          echo "Please contact a repository administrator if you believe this is an error."
+          exit 1
+
+      - name: Action authorized
+        if: steps.check-codeowner.outputs.authorized == 'true'
+        run: |
+          echo "✅ Authorization successful!"
+          echo "User: ${{ github.actor }}"
+          echo "Action: ${{ inputs.action_name }}"
+          echo ""
+          echo "You can now add your protected action steps here..."
+
+          # Add your protected action steps below this line
+          # Example:
+          # - name: Protected deployment
+          #   run: |
+          #     echo "Running protected deployment..."
