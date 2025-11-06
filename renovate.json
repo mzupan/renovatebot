@@ -11,8 +11,8 @@
   "vulnerabilityAlerts": {
     "addLabels": ["security"]
   },
-  "prHourlyLimit": 10,
-  "prConcurrentLimit": 5,
+  "prHourlyLimit": 100,
+  "prConcurrentLimit": 15,
   "helmv3": {
     "fileMatch": ["(^|/)Chart\\.yaml$"]
   },
