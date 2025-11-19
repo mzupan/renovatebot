@@ -17,19 +17,20 @@ env:
   ECR_PREFIX: "mirror"
   ENABLE_WIZ_SCAN: false  # Set to true to enable Wiz vulnerability scanning
   AWS_REGION: "us-east-1"  # AWS region for ECR
-  PR_TITLE_PREFIX: "[DEVOPS-1094]"  # PR title prefix to trigger this workflow
-  # Feature flags should be set as repository variables:
+  PR_TITLE_PREFIX: "[DEVOPS-1094]"  # PR title prefix used in workflow steps
+  AWS_ROLE_ARN: "arn:aws:iam::123456789012:role/GitHubActions-ECRMirror" # IAM role ARN for OIDC authentication
+  # Repository variables (set in Settings > Secrets and variables > Actions > Variables):
   # - FEATURE_ENABLE_WORKFLOWS: Set to 'true' to enable this workflow (default: false)
   # - FEATURE_ENABLE_MIRROR: Set to 'true' to actually mirror images (default: false = dry run mode)
-  # - AWS_ROLE_ARN: IAM role ARN for OIDC authentication
+  # - PR_TITLE_PREFIX: Override PR title prefix (default: '[DEVOPS-1094]' if not set)
 
 jobs:
   extract-images:
-    # Only run for PRs with [DEVOPS-1094] in title on PR open/sync
+    # Only run for PRs with configured prefix in title on PR open/sync
     if: |
       vars.FEATURE_ENABLE_WORKFLOWS == 'true' &&
       github.event_name == 'pull_request' &&
-      startsWith(github.event.pull_request.title, env.PR_TITLE_PREFIX)
+      startsWith(github.event.pull_request.title, vars.PR_TITLE_PREFIX || '[DEVOPS-1094]')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -317,9 +318,9 @@ jobs:
     # Only run for PRs with configured prefix in title
     if: |
       vars.FEATURE_ENABLE_WORKFLOWS == 'true' &&
-      ((github.event_name == 'pull_request' && startsWith(github.event.pull_request.title, env.PR_TITLE_PREFIX)) ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.issue.title, env.PR_TITLE_PREFIX)) ||
-      (github.event_name == 'pull_request_review' && startsWith(github.event.pull_request.title, env.PR_TITLE_PREFIX)))
+      ((github.event_name == 'pull_request' && startsWith(github.event.pull_request.title, vars.PR_TITLE_PREFIX || '[DEVOPS-1094]')) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.issue.title, vars.PR_TITLE_PREFIX || '[DEVOPS-1094]')) ||
+      (github.event_name == 'pull_request_review' && startsWith(github.event.pull_request.title, vars.PR_TITLE_PREFIX || '[DEVOPS-1094]')))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -333,15 +334,14 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
 
       - name: Configure AWS credentials using OIDC
-        if: vars.AWS_ROLE_ARN != ''
         uses: aws-actions/configure-aws-credentials@00943011d9042930efac3dcd3a170e4273319bc8 # v5
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-ECRMirror
 
       - name: Login to Amazon ECR
-        if: vars.AWS_ROLE_ARN != ''
+        if: env.AWS_ROLE_ARN != ''
         uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2
         with:
           mask-password: true
@@ -525,11 +525,11 @@ jobs:
           echo "Status check updated for SHA: $HEAD_SHA"
 
   wiz-scan:
-    # Only run if Wiz scanning is enabled and for PRs with [DEVOPS-1094] in title
+    # Only run if Wiz scanning is enabled and for PRs with configured prefix in title
     if: |
       vars.FEATURE_ENABLE_WORKFLOWS == 'true' &&
       github.event_name == 'pull_request' &&
-      startsWith(github.event.pull_request.title, env.PR_TITLE_PREFIX) &&
+      startsWith(github.event.pull_request.title, vars.PR_TITLE_PREFIX || '[DEVOPS-1094]') &&
       vars.ENABLE_WIZ_SCAN == 'true'
     needs: extract-images
     runs-on: [self-hosted]
@@ -545,15 +545,14 @@ jobs:
           fetch-depth: 2
 
       - name: Configure AWS credentials using OIDC
-        if: vars.AWS_ROLE_ARN != ''
         uses: aws-actions/configure-aws-credentials@00943011d9042930efac3dcd3a170e4273319bc8 # v5
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
           role-session-name: GitHubActions-WizScan
 
       - name: Login to Amazon ECR
-        if: vars.AWS_ROLE_ARN != ''
+        if: env.AWS_ROLE_ARN != ''
         uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2
         with:
           mask-password: true
