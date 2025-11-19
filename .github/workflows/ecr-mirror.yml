@@ -20,15 +20,14 @@ env:
   PR_TITLE_PREFIX: "[DEVOPS-1094]"  # PR title prefix used in workflow steps
   AWS_ROLE_ARN: "arn:aws:iam::123456789012:role/GitHubActions-ECRMirror" # IAM role ARN for OIDC authentication
   # Repository variables (set in Settings > Secrets and variables > Actions > Variables):
-  # - FEATURE_ENABLE_WORKFLOWS: Set to 'true' to enable this workflow (default: false)
   # - FEATURE_ENABLE_MIRROR: Set to 'true' to actually mirror images (default: false = dry run mode)
+  # - FEATURE_ENABLE_WIZ_SCAN: Set to 'true' to enable Wiz vulnerability scanning (default: false)
   # - PR_TITLE_PREFIX: Override PR title prefix (default: '[DEVOPS-1094]' if not set)
 
 jobs:
   extract-images:
     # Only run for PRs with configured prefix in title on PR open/sync
     if: |
-      vars.FEATURE_ENABLE_WORKFLOWS == 'true' &&
       github.event_name == 'pull_request' &&
       startsWith(github.event.pull_request.title, vars.PR_TITLE_PREFIX || '[DEVOPS-1094]')
     runs-on: ubuntu-latest
@@ -317,7 +316,6 @@ jobs:
   check-approval:
     # Only run for PRs with configured prefix in title
     if: |
-      vars.FEATURE_ENABLE_WORKFLOWS == 'true' &&
       ((github.event_name == 'pull_request' && startsWith(github.event.pull_request.title, vars.PR_TITLE_PREFIX || '[DEVOPS-1094]')) ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.issue.title, vars.PR_TITLE_PREFIX || '[DEVOPS-1094]')) ||
       (github.event_name == 'pull_request_review' && startsWith(github.event.pull_request.title, vars.PR_TITLE_PREFIX || '[DEVOPS-1094]')))
@@ -527,10 +525,9 @@ jobs:
   wiz-scan:
     # Only run if Wiz scanning is enabled and for PRs with configured prefix in title
     if: |
-      vars.FEATURE_ENABLE_WORKFLOWS == 'true' &&
       github.event_name == 'pull_request' &&
       startsWith(github.event.pull_request.title, vars.PR_TITLE_PREFIX || '[DEVOPS-1094]') &&
-      vars.ENABLE_WIZ_SCAN == 'true'
+      vars.FEATURE_ENABLE_WIZ_SCAN == 'true'
     needs: extract-images
     runs-on: [self-hosted]
     permissions:
