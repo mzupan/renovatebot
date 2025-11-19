@@ -17,6 +17,7 @@ env:
   ECR_PREFIX: "mirror"
   ENABLE_WIZ_SCAN: false  # Set to true to enable Wiz vulnerability scanning
   AWS_REGION: "us-east-1"  # AWS region for ECR
+  PR_TITLE_PREFIX: "[DEVOPS-1094]"  # PR title prefix to trigger this workflow
   # Feature flags should be set as repository variables:
   # - FEATURE_ENABLE_WORKFLOWS: Set to 'true' to enable this workflow (default: false)
   # - FEATURE_ENABLE_MIRROR: Set to 'true' to actually mirror images (default: false = dry run mode)
@@ -28,7 +29,7 @@ jobs:
     if: |
       vars.FEATURE_ENABLE_WORKFLOWS == 'true' &&
       github.event_name == 'pull_request' &&
-      startsWith(github.event.pull_request.title, '[DEVOPS-1094]')
+      startsWith(github.event.pull_request.title, env.PR_TITLE_PREFIX)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -313,12 +314,12 @@ jobs:
           echo "✅ Comment posted to PR #$PR_NUM"
 
   check-approval:
-    # Only run for PRs with [DEVOPS-1094] in title
+    # Only run for PRs with configured prefix in title
     if: |
       vars.FEATURE_ENABLE_WORKFLOWS == 'true' &&
-      ((github.event_name == 'pull_request' && startsWith(github.event.pull_request.title, '[DEVOPS-1094]')) ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.issue.title, '[DEVOPS-1094]')) ||
-      (github.event_name == 'pull_request_review' && startsWith(github.event.pull_request.title, '[DEVOPS-1094]')))
+      ((github.event_name == 'pull_request' && startsWith(github.event.pull_request.title, env.PR_TITLE_PREFIX)) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && startsWith(github.event.issue.title, env.PR_TITLE_PREFIX)) ||
+      (github.event_name == 'pull_request_review' && startsWith(github.event.pull_request.title, env.PR_TITLE_PREFIX)))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -528,7 +529,7 @@ jobs:
     if: |
       vars.FEATURE_ENABLE_WORKFLOWS == 'true' &&
       github.event_name == 'pull_request' &&
-      startsWith(github.event.pull_request.title, '[DEVOPS-1094]') &&
+      startsWith(github.event.pull_request.title, env.PR_TITLE_PREFIX) &&
       vars.ENABLE_WIZ_SCAN == 'true'
     needs: extract-images
     runs-on: [self-hosted]
